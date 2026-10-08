@@ -121,7 +121,8 @@ for an unanticipated field name, not a substitute for marking your fields explic
 #### Endpoint fields
 
 Any field whose value decides where a request goes (a base URL, an endpoint, a host, whatever you
-call it) must set `'endpoint' => true` on its descriptor (`baseUrlField()` does). On save, a masked
+call it) must set `'endpoint' => true` on its descriptor (`baseUrlField()` does). Fields named
+`base_url` or `endpoint` are guarded by name as well, flag or not. On save, a masked
 `******` credential is only restored from storage while every endpoint field of the row still holds
 what is stored. If an endpoint changed in the same save, the save is refused and the administrator
 has to type the credential again; otherwise anyone who can edit the form could point the row at a

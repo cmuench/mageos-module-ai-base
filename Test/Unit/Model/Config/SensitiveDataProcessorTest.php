@@ -329,15 +329,30 @@ final class SensitiveDataProcessorTest extends TestCase
     }
 
     /**
-     * The fallback names are for rows whose provider is gone. A registered provider that declares
-     * no `base_url` endpoint has nothing riding on a field of that name, so editing it alone must
-     * not force the credential to be typed again.
+     * A provider written before the endpoint flag existed declares its `base_url` without it. That
+     * field was guarded by name before the flag, and must stay guarded (issue #62).
      */
-    public function test_restore_row_trusts_the_schema_over_the_fallback_endpoint_names(): void
+    public function test_restore_row_guards_a_base_url_the_registered_schema_does_not_flag(): void
+    {
+        $this->expectException(LocalizedException::class);
+        $this->expectExceptionMessage('has to be entered again');
+
+        $this->subject->restoreRow(
+            self::KNOWN_SERVICE,
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'base_url' => 'http://attacker.test'],
+            ['certificate' => '0:3:enc(secret)', 'base_url' => 'https://first.test'],
+        );
+    }
+
+    /**
+     * Guarding the fallback names for a registered provider must not make an unchanged row refuse
+     * its masked credential.
+     */
+    public function test_restore_row_keeps_the_credential_when_an_unflagged_base_url_is_unchanged(): void
     {
         $result = $this->subject->restoreRow(
             self::KNOWN_SERVICE,
-            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'base_url' => 'http://other.test'],
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'base_url' => 'https://first.test'],
             ['certificate' => '0:3:enc(secret)', 'base_url' => 'https://first.test'],
         );
 

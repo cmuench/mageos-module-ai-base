@@ -116,9 +116,9 @@ Console/Command/
      keeps credentials. Row identity relies on the form reusing stored row IDs. Restore is
      refused (`isRedirected()`) if any endpoint field changed in the same save, so a
      redirected endpoint can never read back a credential it was never issued. Endpoint fields
-     are the ones whose descriptor says `isEndpoint()` (`baseUrlField()` and Azure's `endpoint`);
-     only rows whose provider is no longer registered fall back to the names `base_url` and
-     `endpoint`. An endpoint absent from the stored row counts as empty, so adding one is a change.
+     are the ones whose descriptor says `isEndpoint()` (`baseUrlField()` and Azure's `endpoint`),
+     plus any field named `base_url` or `endpoint`, for registered and unregistered providers
+     alike, so a provider that predates the flag keeps the guard it had. An endpoint absent from the stored row counts as empty, so adding one is a change.
    - `encryptRow()` — descriptor-flagged fields are encrypted with Magento's
      `EncryptorInterface`. Encryption is idempotent: values already carrying the encryptor
      envelope (`N:N:...`) are left alone.
@@ -346,7 +346,7 @@ saves so credential restore can match rows.
   same save, since that would let a redirected endpoint read back a credential it was never
   issued. Which fields are endpoints is schema-driven (`FieldDescriptorInterface::isEndpoint()`),
   so a third-party host field called `host` or `api_base` is guarded too; `base_url`/`endpoint`
-  are only a fallback for rows whose provider is no longer registered.
+  are guarded by name on every row, so a provider that predates the flag is not left open.
 - **Encryption key rotation**: Magento re-encrypts only config values that are a ciphertext as a
   whole, so the credentials inside the services JSON would stay under the old key and decrypt to
   an empty string once it is removed from `crypt/key`. `Plugin\EncryptionKey\ReEncryptWithCoreConfigData`

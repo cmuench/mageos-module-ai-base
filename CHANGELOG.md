@@ -74,7 +74,8 @@ Since v0.0.1:
 
 ### Removed
 - The `xai` and `grok` providers. Symfony AI has no xAI bridge, so neither could ever be called.
-  A stored `xai` row is dropped the next time AI Configuration is saved.
+  A stored `xai` row is kept, marked as having no installed provider, and can never be called;
+  delete it with its own delete button in AI Configuration.
 
 ### Fixed
 - A stream cut off at the output token limit keeps the signed reasoning it completed, so a tool
@@ -104,8 +105,9 @@ Since v0.0.1:
 - Credentials are encrypted at rest, masked as `******` in the form, dumped to `env.php` rather
   than the commonly committed `config.php`, and re-encrypted when the encryption key is rotated.
 - A stored key is dropped when a row's endpoint changes in the same save, for any field a provider
-  flags as an endpoint, so a key cannot be redirected to another host. Refresh Models takes the
-  provider from the stored row, not from the request.
+  flags as an endpoint and for any field named `base_url` or `endpoint`, so a key cannot be
+  redirected to another host ([#62](https://github.com/mage-os-lab/module-ai-base/issues/62)).
+  Refresh Models takes the provider from the stored row, not from the request.
 - Test Connection and Refresh Models log provider and HTTP client errors instead of echoing them
   into the page, where a URL could carry a token ([#52](https://github.com/mage-os-lab/module-ai-base/issues/52)).
 - The credential-name fallback for rows of an uninstalled provider recognises far more names

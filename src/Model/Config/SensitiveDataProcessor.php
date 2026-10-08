@@ -16,7 +16,7 @@ use MageOS\AiBase\Model\ServiceRegistry;
  * when its descriptor reports isEncrypted(). For service codes without a registered
  * schema, or for fields the schema does not describe, a field-name heuristic is used
  * as a fallback (see SENSITIVE_NAME_SUFFIXES). Which fields name the host a row talks to is
- * decided the same way, from isEndpoint(), with FALLBACK_ENDPOINT_KEYS for unregistered rows.
+ * decided from isEndpoint(), plus FALLBACK_ENDPOINT_KEYS for every row.
  *
  * Shared by the config backend model (write path) and the service selector (read path).
  */
@@ -62,11 +62,11 @@ class SensitiveDataProcessor
      * no longer registered.
      *
      * A registered provider says which of its fields are endpoints through
-     * FieldDescriptorInterface::isEndpoint(), which is authoritative for it, so a third-party host
-     * field called `host`, `api_base` or `url` is guarded as well. A row whose provider module was
-     * removed has no descriptors left, but can still be edited and saved; for it, these are the
-     * names the bundled providers use, the same way SENSITIVE_NAME_SUFFIXES stands in for the
-     * encrypted flag.
+     * FieldDescriptorInterface::isEndpoint(), so a third-party host field called `host`, `api_base`
+     * or `url` is guarded as well. These names are guarded on top of that, for every row: a row
+     * whose provider module was removed has no descriptors left but can still be edited and saved,
+     * and a provider written before the endpoint flag existed declares its `base_url` without it,
+     * yet had that field guarded by name all along.
      */
     private const FALLBACK_ENDPOINT_KEYS = ['base_url', 'endpoint'];
 
@@ -240,24 +240,24 @@ class SensitiveDataProcessor
     /**
      * The fields of a service that name the host its credentials are sent to.
      *
-     * The registered schema is authoritative when the provider is registered, including when it
-     * declares no endpoint at all (a hosted provider with a fixed URL). Only a row with no
-     * registered provider falls back to FALLBACK_ENDPOINT_KEYS.
+     * The fields the registered schema flags, plus FALLBACK_ENDPOINT_KEYS whether the provider is
+     * registered or not. A field named like an endpoint is never treated as anything else: guarding
+     * one that turns out not to be costs a retyped key, missing one costs the key itself.
      *
      * @param string $serviceCode
      * @return list<string>
      */
     private function getEndpointFieldNames(string $serviceCode): array
     {
-        $fields = $this->getFieldSchema()[$serviceCode] ?? null;
-        if ($fields === null) {
-            return self::FALLBACK_ENDPOINT_KEYS;
-        }
-
-        return array_values(array_map(
+        $flaggedNames = array_map(
             static fn (FieldDescriptorInterface $field): string => $field->getName(),
-            array_filter($fields, static fn (FieldDescriptorInterface $field): bool => $field->isEndpoint()),
-        ));
+            array_filter(
+                $this->getFieldSchema()[$serviceCode] ?? [],
+                static fn (FieldDescriptorInterface $field): bool => $field->isEndpoint(),
+            ),
+        );
+
+        return array_values(array_unique([...self::FALLBACK_ENDPOINT_KEYS, ...$flaggedNames]));
     }
 
     /**
