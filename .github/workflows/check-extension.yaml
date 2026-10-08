@@ -20,6 +20,22 @@ jobs:
         with:
           project: mage-os
 
+  # The oldest Magento Open Source release composer.json allows. The Mage-OS matrix above only
+  # covers current Mage-OS, so without this the floor of the magento/framework constraint would
+  # never see the unit, integration or compile jobs. Raise it together with that constraint.
+  compute-lowest-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.supported.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: graycoreio/github-actions-magento2/supported-version@v8.9.0
+        id: supported
+        with:
+          project: magento-open-source
+          kind: custom
+          custom_versions: 'magento/project-community-edition:2.4.7'
+
   # The reusable workflow below has no static-analysis job, so this runs one. It installs the
   # module standalone rather than inside a Magento project, because phpstan only needs the
   # framework classes on the autoloader, not a working install.
@@ -86,3 +102,9 @@ jobs:
       # to https://repo.mage-os.org/. Without this override, composer fails with
       # "Could not find package mage-os/project-community-edition".
       magento_repository: https://repo.mage-os.org/
+
+  check-extension-lowest:
+    needs: compute-lowest-matrix
+    uses: graycoreio/github-actions-magento2/.github/workflows/check-extension.yaml@v8.9.0
+    with:
+      matrix: ${{ needs.compute-lowest-matrix.outputs.matrix }}
