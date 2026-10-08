@@ -10,6 +10,7 @@ use Magento\Config\Model\Config\Structure\Element\Field;
 use Magento\Framework\App\Config as AppConfig;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Config\Storage\WriterInterface;
+use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\ValidatorException;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\TestFramework\Fixture\AppArea;
@@ -202,6 +203,44 @@ final class CredentialStorageTest extends TestCase
             $this->saveServices([EncryptedServices::EMPTY_MARKER => '']);
             self::fail('A post from a form that did not finish rendering was accepted.');
         } catch (ValidatorException) {
+        }
+
+        $this->objectManager->get(AppConfig::class)->clean();
+        self::assertSame($before, $this->storedValue());
+    }
+
+    /**
+     * Leaving a key masked while pointing its row at another host would restore the stored key and
+     * hand it to that host on the next Test Connection. The registered provider's descriptor is
+     * what marks `base_url` as the field to watch, so this also asserts the flag reaches the guard
+     * through the real registry.
+     */
+    public function test_a_masked_credential_is_not_carried_over_to_a_new_endpoint(): void
+    {
+        $this->saveServices([
+            '_row1' => [
+                'openai_compatible' => [
+                    'api_key' => self::API_KEY,
+                    'base_url' => 'https://gateway.internal',
+                    'model' => 'llama3',
+                ],
+            ],
+        ]);
+        $before = $this->storedValue();
+
+        try {
+            $this->saveServices([
+                '_row1' => [
+                    'openai_compatible' => [
+                        'api_key' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER,
+                        'base_url' => 'http://attacker.test',
+                        'model' => 'llama3',
+                    ],
+                ],
+            ]);
+            self::fail('A masked credential was carried over to a new endpoint.');
+        } catch (LocalizedException $exception) {
+            self::assertStringContainsString('has to be entered again', $exception->getMessage());
         }
 
         $this->objectManager->get(AppConfig::class)->clean();

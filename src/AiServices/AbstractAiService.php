@@ -121,7 +121,10 @@ abstract class AbstractAiService implements AiServiceConfigurationInterface, Pla
     }
 
     /**
-     * Build the standard base URL text field.
+     * Build the standard base URL text field, flagged as an endpoint.
+     *
+     * The endpoint flag is what stops a masked credential from being carried over to a host typed
+     * into this field in the same save; see FieldDescriptorInterface::isEndpoint().
      *
      * @param string $default
      * @param string|null $label Overrides the default "Base URL" label, e.g. to warn about a
@@ -131,10 +134,11 @@ abstract class AbstractAiService implements AiServiceConfigurationInterface, Pla
     protected function baseUrlField(string $default, ?string $label = null): FieldDescriptorInterface
     {
         return $this->fieldFactory->create([
-            'name'    => self::FIELD_BASE_URL,
-            'label'   => $label ?? 'Base URL',
-            'type'    => FieldDescriptorInterface::TYPE_TEXT,
-            'default' => $default,
+            'name'     => self::FIELD_BASE_URL,
+            'label'    => $label ?? 'Base URL',
+            'type'     => FieldDescriptorInterface::TYPE_TEXT,
+            'default'  => $default,
+            'endpoint' => true,
         ]);
     }
 

@@ -28,6 +28,7 @@ final class ServicesTest extends TestCase
                 options: $data['options'] ?? [],
                 default: $data['default'] ?? null,
                 encrypted: $data['encrypted'] ?? false,
+                endpoint: $data['endpoint'] ?? false,
             )
         );
         $this->fieldFactory = $stub;
@@ -60,6 +61,11 @@ final class ServicesTest extends TestCase
                 $field->getName() === 'api_key',
                 $field->isEncrypted(),
                 "$className field '{$field->getName()}' must be encrypted iff it is the api_key credential"
+            );
+            self::assertSame(
+                in_array($field->getName(), ['base_url', 'endpoint'], true),
+                $field->isEndpoint(),
+                "$className field '{$field->getName()}' must be flagged as an endpoint iff it names the host"
             );
         }
 

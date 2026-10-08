@@ -25,6 +25,28 @@ final class AclTest extends TestCase
         self::assertSame('Mage-OS AI Usage', (string) $usage['title']);
     }
 
+    /**
+     * The configuration resource guards provider credentials and the outbound Test and Refresh
+     * requests. Nested under Attributes, granting a merchandiser role "Attributes" granted all of
+     * that too; under Magento_Config::config it comes only with the right to edit configuration,
+     * like every other configuration section.
+     */
+    public function test_it_nests_the_configuration_resource_with_the_other_configuration_sections(): void
+    {
+        $configuration = $this->findResourceById('MageOS_AiBase::configuration');
+
+        self::assertNotNull($configuration);
+        self::assertSame(
+            ['Magento_Backend::admin', 'Magento_Backend::stores', 'Magento_Backend::stores_settings', 'Magento_Config::config'],
+            $this->ancestorIds($configuration)
+        );
+    }
+
+    public function test_it_declares_no_resource_under_stores_attributes(): void
+    {
+        self::assertNull($this->findResourceById('Magento_Backend::stores_attributes'));
+    }
+
     public function test_it_groups_the_ai_reports_under_their_own_resource(): void
     {
         $group = $this->findResourceById('MageOS_AiBase::reports');
@@ -61,6 +83,19 @@ final class AclTest extends TestCase
         self::assertTrue($document->schemaValidate(
             (new \Magento\Framework\Config\Dom\UrnResolver())->getRealPath('urn:magento:framework:Acl/etc/acl.xsd')
         ));
+    }
+
+    /**
+     * Ids of a resource's ancestors, outermost first.
+     *
+     * @return list<string>
+     */
+    private function ancestorIds(\SimpleXMLElement $resource): array
+    {
+        return array_map(
+            static fn (\SimpleXMLElement $ancestor): string => (string) $ancestor['id'],
+            $resource->xpath('ancestor::resource')
+        );
     }
 
     private function findResourceById(string $id): ?\SimpleXMLElement

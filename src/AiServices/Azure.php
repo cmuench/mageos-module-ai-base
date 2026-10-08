@@ -51,10 +51,11 @@ class Azure extends AbstractAiService
         return [
             $this->apiKeyField(),
             $this->fieldFactory->create([
-                'name'    => 'endpoint',
-                'label'   => 'Endpoint',
-                'type'    => FieldDescriptorInterface::TYPE_TEXT,
-                'default' => 'https://<resource>.openai.azure.com',
+                'name'     => 'endpoint',
+                'label'    => 'Endpoint',
+                'type'     => FieldDescriptorInterface::TYPE_TEXT,
+                'default'  => 'https://<resource>.openai.azure.com',
+                'endpoint' => true,
             ]),
             $this->modelField($this->getSupportedModels()),
         ];

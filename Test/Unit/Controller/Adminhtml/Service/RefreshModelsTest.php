@@ -124,7 +124,9 @@ final class RefreshModelsTest extends TestCase
 
         $azure = $this->createMock(AiServiceConfigurationInterface::class);
         $azure->method('getCode')->willReturn('azure');
-        $this->serviceSelector->expects(self::never())->method('getByCode');
+        $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('azure');
+        $this->serviceSelector->method('getByCode')->with('azure')->willReturn([$configured]);
         $this->storage->expects(self::never())->method('saveForRow');
 
         $this->createSubject([$azure])->execute();
@@ -150,6 +152,7 @@ final class RefreshModelsTest extends TestCase
         $this->stubParams(['service_code' => 'openai']);
 
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getId')->willReturn('_first_openai_row');
         $configured->method('getConfiguration')->willReturn(['api_key' => 'sk-test', 'model' => 'gpt-4o']);
         $this->serviceSelector->method('getByCode')->with('openai')->willReturn([$configured]);
@@ -173,6 +176,7 @@ final class RefreshModelsTest extends TestCase
         $this->stubParams(['service_code' => 'openai']);
 
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getConfiguration')->willReturn(['api_key' => 'bad']);
         $this->serviceSelector->method('getByCode')->with('openai')->willReturn([$configured]);
 
@@ -195,6 +199,7 @@ final class RefreshModelsTest extends TestCase
         $this->stubParams(['service_code' => 'openai']);
 
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getConfiguration')->willReturn([]);
         $this->serviceSelector->method('getByCode')->with('openai')->willReturn([$configured]);
 
@@ -223,6 +228,7 @@ final class RefreshModelsTest extends TestCase
         $this->stubParams(['service_id' => '_second_openai_row', 'service_code' => 'openai']);
 
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getConfiguration')->willReturn(['api_key' => 'key-of-the-second-row']);
         $this->serviceSelector->expects(self::once())->method('getById')
             ->with('_second_openai_row')->willReturn($configured);
@@ -245,6 +251,7 @@ final class RefreshModelsTest extends TestCase
     {
         $this->stubParams(['service_id' => '_ollama_host_b', 'service_code' => 'openai']);
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getId')->willReturn('_ollama_host_b');
         $configured->method('getConfiguration')->willReturn([]);
         $this->serviceSelector->method('getById')->willReturn($configured);
@@ -271,6 +278,7 @@ final class RefreshModelsTest extends TestCase
         $website = new ConfigScope('websites', 2, 'second');
         $scopeWhileReading = null;
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
         $configured->method('getId')->willReturn('_website_row');
         $configured->method('getConfiguration')->willReturn([]);
         $this->serviceSelector->method('getById')->willReturnCallback(
@@ -294,5 +302,62 @@ final class RefreshModelsTest extends TestCase
         self::assertSame($website, $scopeWhileReading);
         self::assertSame($website, $storedAt);
         self::assertNull($this->serviceScope->getCurrent());
+    }
+
+    /**
+     * The provider decides which host the row's key is sent to, and the row decides which key. A
+     * request naming one row by id and another provider by code would send that row's key to the
+     * other provider's host, so a code that disagrees with the row stops the refresh outright.
+     */
+    public function test_execute_refuses_a_posted_code_that_differs_from_the_row_and_fetches_nothing(): void
+    {
+        $this->stubParams(['service_id' => '_ollama_row', 'service_code' => 'openai']);
+        $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('ollama');
+        $configured->method('getConfiguration')->willReturn(['api_key' => 'key-of-the-ollama-row']);
+        $this->serviceSelector->method('getById')->with('_ollama_row')->willReturn($configured);
+        $this->openAi->expects(self::never())->method('fetchModels');
+        $this->storage->expects(self::never())->method('saveForRow');
+
+        $this->createSubject([$this->openAi])->execute();
+
+        self::assertFalse($this->resultData['success']);
+        self::assertSame(
+            'This row is stored as a "ollama" service, not "openai", so its models were not refreshed. '
+            . 'Reload the page and try again.',
+            $this->resultData['error']
+        );
+    }
+
+    /**
+     * With only a row id the provider comes from the row, so a caller cannot pick it at all.
+     */
+    public function test_execute_takes_the_provider_from_the_row_when_no_code_is_posted(): void
+    {
+        $this->stubParams(['service_id' => '_openai_row']);
+        $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getCode')->willReturn('openai');
+        $configured->method('getId')->willReturn('_openai_row');
+        $configured->method('getConfiguration')->willReturn(['api_key' => 'sk-row']);
+        $this->serviceSelector->method('getById')->willReturn($configured);
+        $this->openAi->expects(self::once())->method('fetchModels')
+            ->with(['api_key' => 'sk-row'])
+            ->willReturn(['gpt-4o' => 'gpt-4o']);
+
+        $this->createSubject([$this->openAi])->execute();
+
+        self::assertTrue($this->resultData['success']);
+    }
+
+    public function test_execute_reports_a_row_id_that_does_not_exist(): void
+    {
+        $this->stubParams(['service_id' => '_gone', 'service_code' => 'openai']);
+        $this->serviceSelector->method('getById')->with('_gone')->willReturn(null);
+        $this->openAi->expects(self::never())->method('fetchModels');
+
+        $this->createSubject([$this->openAi])->execute();
+
+        self::assertFalse($this->resultData['success']);
+        self::assertSame('No AI service configured with id "_gone".', $this->resultData['error']);
     }
 }

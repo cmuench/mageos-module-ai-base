@@ -72,6 +72,8 @@ anything else, using the protected field builders:
 - `baseUrlField(string $default, ?string $label = null)` — text input named `base_url` (local runtimes)
 - `freeTextModelField()` — text input named `model` (no curated list)
 
+`baseUrlField()` also flags its field as an endpoint; see "Endpoint fields" below.
+
 You can also build fields directly with `FieldDescriptorInterfaceFactory`:
 
 ```php
@@ -82,8 +84,12 @@ $this->fieldFactory->create([
     'options'   => [],          // for selects: [['value' => ..., 'label' => ...], ...]
     'default'   => 'https://acme.example/v1',
     'encrypted' => false,
+    'endpoint'  => true,        // names the host the row's credentials are sent to
 ])
 ```
+
+`encrypted` and `endpoint` both default to `false`, so a `create([...])` call that leaves them
+out keeps working.
 
 ### Field naming conventions
 
@@ -93,8 +99,8 @@ Use snake_case. Established names — reuse them, several code paths key on them
 |---|---|
 | `api_key` | Credential (encrypted, masked in the form) |
 | `model` | Selected model; for Azure this doubles as the deployment name |
-| `base_url` | Local-runtime endpoint (Ollama, LM Studio) |
-| `endpoint` | Hosted resource endpoint (Azure) |
+| `base_url` | Local-runtime endpoint (Ollama, LM Studio); flagged as an endpoint |
+| `endpoint` | Hosted resource endpoint (Azure); flagged as an endpoint |
 | `api_version` | Optional API version override (Azure) |
 
 ### 2. Encryption is schema-driven
@@ -111,6 +117,23 @@ field name, lowercased and with `_` and `-` removed, counts as a credential when
 `client_secret`, `access_token` and `bearer_token` are covered, while `max_tokens` and
 `token_endpoint` are not. Do not rely on the heuristic for new code — it is defense in depth
 for an unanticipated field name, not a substitute for marking your fields explicitly.
+
+#### Endpoint fields
+
+Any field whose value decides where a request goes (a base URL, an endpoint, a host, whatever you
+call it) must set `'endpoint' => true` on its descriptor (`baseUrlField()` does). On save, a masked
+`******` credential is only restored from storage while every endpoint field of the row still holds
+what is stored. If an endpoint changed in the same save, the save is refused and the administrator
+has to type the credential again; otherwise anyone who can edit the form could point the row at a
+server they control, leave the key masked, press Test Connection and read the stored key off their
+own server. A value that is missing from the stored row counts as empty, so filling in an endpoint
+where none was stored is a change too; empty on both sides is not. Surrounding space and a trailing
+slash are ignored.
+
+For a registered provider the descriptors are authoritative: only fields flagged `endpoint` are
+compared, under whatever name. Only rows whose provider is no longer registered fall back to the
+names `base_url` and `endpoint`, the same way the credential-name heuristic above stands in for the
+`encrypted` flag. A third-party host field that is not flagged is therefore not guarded at all.
 
 ### 3. Register in di.xml
 
@@ -324,8 +347,15 @@ public function __construct(
 - Form: Stores > Configuration > Mage-OS > AI Configuration (`system.xml` field
   `mageos_ai/services/configuration`, backend model `Model\Config\Backend\EncryptedServices`,
   frontend model `Block\Adminhtml\Configuration\Services`).
-- ACL: `MageOS_AiBase::configuration` (also guards the Test Connection and Refresh Models
+- ACL: `MageOS_AiBase::configuration`, under Stores > Settings > Configuration in the role tree
+  like every other configuration section (also guards the Test Connection and Refresh Models
   controllers under the `mageos_ai` adminhtml route).
+- Refresh Models fetches with the provider the requested row is stored as. A posted
+  `service_code` that disagrees with the row named by `service_id` is refused, so a crafted request
+  cannot send one row's key to another provider's host.
+- Encryption key rotation: credentials of every provider, including yours, are re-encrypted
+  along with Magento's own config values (see "Security model" in `docs/ARCHITECTURE.md`), as
+  long as each credential field is flagged `encrypted`. Nothing to do on the provider side.
 - The form's JavaScript is emitted through `SecureHtmlRenderer` and is CSP-compliant; if you
   extend the template, keep script content inside the rendered tag rather than adding inline
   `<script>` blocks.

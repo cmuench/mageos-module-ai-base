@@ -57,4 +57,17 @@ interface FieldDescriptorInterface
      * @return bool
      */
     public function isEncrypted(): bool;
+
+    /**
+     * Whether the field names the host the row's credentials are sent to.
+     *
+     * A stored credential is only ever restored from its masked placeholder while the row keeps
+     * pointing at the host it was saved for. Without this flag an administrator could point the
+     * row at a server they control, leave the key masked, press Test Connection and read the key
+     * off their own server. Set it on every field whose value decides where a request goes (a base
+     * URL, an endpoint, a host), whatever the field is called.
+     *
+     * @return bool
+     */
+    public function isEndpoint(): bool;
 }

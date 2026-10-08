@@ -24,6 +24,24 @@ final class FieldDescriptorTest extends TestCase
         self::assertSame([], $field->getOptions());
         self::assertNull($field->getDefault());
         self::assertFalse($field->isEncrypted());
+        self::assertFalse($field->isEndpoint());
+    }
+
+    /**
+     * A field naming the host credentials go to carries that, so the redirect guard can find it
+     * under whatever name a provider gives it.
+     */
+    public function test_endpoint_flag_is_carried(): void
+    {
+        $field = new FieldDescriptor(
+            name: 'host',
+            label: 'Host',
+            type: FieldDescriptorInterface::TYPE_TEXT,
+            endpoint: true,
+        );
+
+        self::assertTrue($field->isEndpoint());
+        self::assertFalse($field->isEncrypted());
     }
 
     public function test_encrypted_flag_is_carried(): void

@@ -312,6 +312,108 @@ final class SensitiveDataProcessorTest extends TestCase
         self::assertSame(['api_key' => '', 'base_url' => 'http://new.test'], $result);
     }
 
+    /**
+     * A third-party provider does not have to call its host field `base_url`. Its descriptor says
+     * which field is the endpoint, and moving that field must be guarded just the same.
+     */
+    public function test_restore_row_guards_an_endpoint_the_schema_flags_whatever_its_name(): void
+    {
+        $this->expectException(LocalizedException::class);
+        $this->expectExceptionMessage('has to be entered again');
+
+        $this->subject->restoreRow(
+            self::KNOWN_SERVICE,
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'host' => 'http://attacker.test'],
+            ['certificate' => '0:3:enc(secret)', 'host' => 'https://api.fake.test'],
+        );
+    }
+
+    /**
+     * The fallback names are for rows whose provider is gone. A registered provider that declares
+     * no `base_url` endpoint has nothing riding on a field of that name, so editing it alone must
+     * not force the credential to be typed again.
+     */
+    public function test_restore_row_trusts_the_schema_over_the_fallback_endpoint_names(): void
+    {
+        $result = $this->subject->restoreRow(
+            self::KNOWN_SERVICE,
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'base_url' => 'http://other.test'],
+            ['certificate' => '0:3:enc(secret)', 'base_url' => 'https://first.test'],
+        );
+
+        self::assertSame('0:3:enc(secret)', $result['certificate']);
+    }
+
+    /**
+     * A stored row without the endpoint field (saved before the provider had one, or edited by
+     * hand) must not let the first host typed into it receive the stored key.
+     */
+    public function test_restore_row_treats_an_endpoint_absent_from_the_stored_row_as_empty(): void
+    {
+        $this->expectException(LocalizedException::class);
+        $this->expectExceptionMessage('has to be entered again');
+
+        $this->subject->restoreRow(
+            self::KNOWN_SERVICE,
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'host' => 'http://attacker.test'],
+            ['certificate' => '0:3:enc(secret)'],
+        );
+    }
+
+    /**
+     * Same for a row whose provider is no longer registered, guarded through the fallback names.
+     */
+    public function test_restore_row_treats_a_fallback_endpoint_absent_from_the_stored_row_as_empty(): void
+    {
+        $this->expectException(LocalizedException::class);
+
+        $this->subject->restoreRow(
+            self::UNKNOWN_SERVICE,
+            ['api_key' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'endpoint' => 'http://attacker.test'],
+            ['api_key' => '0:3:enc(secret-key)'],
+        );
+    }
+
+    /**
+     * An endpoint that is empty before and after did not move, so the credential is restored.
+     */
+    public function test_restore_row_keeps_the_credential_when_the_endpoint_is_empty_on_both_sides(): void
+    {
+        $result = $this->subject->restoreRow(
+            self::KNOWN_SERVICE,
+            ['certificate' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'host' => ' '],
+            ['certificate' => '0:3:enc(secret)'],
+        );
+
+        self::assertSame('0:3:enc(secret)', $result['certificate']);
+    }
+
+    public function test_encrypted_field_names_lists_only_encrypted_credentials(): void
+    {
+        $names = $this->subject->getEncryptedFieldNames(self::KNOWN_SERVICE, [
+            'certificate' => '0:3:enc(secret)',
+            'token'       => '0:3:looks-encrypted-but-is-a-plain-setting',
+            'model'       => 'fake-1',
+            'host'        => 'https://api.fake.test',
+        ]);
+
+        self::assertSame(['certificate'], $names);
+    }
+
+    /**
+     * A legacy plaintext credential has no ciphertext to re-encrypt, and an empty one has nothing.
+     */
+    public function test_encrypted_field_names_skips_plaintext_and_empty_credentials(): void
+    {
+        $names = $this->subject->getEncryptedFieldNames(self::UNKNOWN_SERVICE, [
+            'api_key'       => 'legacy-plaintext',
+            'client_secret' => '',
+            'access_token'  => '0:3:enc(token)',
+        ]);
+
+        self::assertSame(['access_token'], $names);
+    }
+
     public function test_restore_row_ignores_placeholder_in_non_sensitive_fields(): void
     {
         $result = $this->subject->restoreRow(
@@ -345,7 +447,8 @@ final class SensitiveDataProcessorTest extends TestCase
      * Build a fake provider with a field schema exercising all sensitivity paths:
      * an encrypted field whose name the heuristic would miss ("certificate"), an
      * explicitly unencrypted field whose name the heuristic would match ("token"),
-     * and a plain unencrypted field ("model").
+     * a plain unencrypted field ("model"), and an endpoint under a name the fallback list does
+     * not know ("host").
      *
      * @return AiServiceConfigurationInterface
      */
@@ -389,6 +492,12 @@ final class SensitiveDataProcessorTest extends TestCase
                         name: 'model',
                         label: 'Model',
                         type: FieldDescriptorInterface::TYPE_TEXT,
+                    ),
+                    new FieldDescriptor(
+                        name: 'host',
+                        label: 'Host',
+                        type: FieldDescriptorInterface::TYPE_TEXT,
+                        endpoint: true,
                     ),
                 ];
             }

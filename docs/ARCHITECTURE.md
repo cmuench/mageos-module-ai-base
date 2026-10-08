@@ -51,6 +51,8 @@ Model/
   FieldDescriptor, AiService        value objects behind the Data interfaces
   Config/
     SensitiveDataProcessor          encrypt/decrypt/mask/restore per service schema
+    CredentialReEncryptor           re-encrypts stored credentials at every scope after a key change
+    StoredServicesStorage           raw read/conditional write of every scope's stored value (internal)
     Backend/EncryptedServices       config backend model (save/load hooks)
     Source/ConfiguredService        option source for consumer modules' own system.xml fields
     Source/ConfiguredServiceWithAutomatic  the same, plus an empty-valued "Automatic" option
@@ -92,6 +94,9 @@ Controller/Adminhtml/
   Service/Test                       Test Connection endpoint (JSON)
   Service/RefreshModels              manual model list refresh endpoint (JSON)
   Usage/Index                        the Reports > AI Token Usage admin page
+Plugin/EncryptionKey/
+  ReEncryptAfterKeyChange            after Key\Change::changeEncryptionKey() (admin key change page)
+  ReEncryptWithCoreConfigData        after the core_config_data re-encryptor (encryption:data:re-encrypt)
 Cron/
   RollUpUsage                        scheduled entry point for UsageMaintenance
 Console/Command/
@@ -108,8 +113,11 @@ Console/Command/
    - `restoreRow()` — any submitted `******` placeholder is replaced by the previously
      stored (still encrypted) value for that row/service/field, so saving without retyping
      keeps credentials. Row identity relies on the form reusing stored row IDs. Restore is
-     refused (`isRedirected()`) if `base_url`/`endpoint` changed in the same save, so a
-     redirected endpoint can never read back a credential it was never issued.
+     refused (`isRedirected()`) if any endpoint field changed in the same save, so a
+     redirected endpoint can never read back a credential it was never issued. Endpoint fields
+     are the ones whose descriptor says `isEndpoint()` (`baseUrlField()` and Azure's `endpoint`);
+     only rows whose provider is no longer registered fall back to the names `base_url` and
+     `endpoint`. An endpoint absent from the stored row counts as empty, so adding one is a change.
    - `encryptRow()` — descriptor-flagged fields are encrypted with Magento's
      `EncryptorInterface`. Encryption is idempotent: values already carrying the encryptor
      envelope (`N:N:...`) are left alone.
@@ -319,9 +327,26 @@ saves so credential restore can match rows.
   only to rows whose provider class is no longer registered (defense in depth for removed
   third-party modules).
 - **No plaintext in the admin**: masked on load, restored on save (see flows above).
-  Restore also refuses to carry a masked credential across an edited `base_url`/
-  `endpoint` in the same save, since that would let a redirected endpoint read back a
-  credential it was never issued.
+  Restore also refuses to carry a masked credential across an edited endpoint field in the
+  same save, since that would let a redirected endpoint read back a credential it was never
+  issued. Which fields are endpoints is schema-driven (`FieldDescriptorInterface::isEndpoint()`),
+  so a third-party host field called `host` or `api_base` is guarded too; `base_url`/`endpoint`
+  are only a fallback for rows whose provider is no longer registered.
+- **Encryption key rotation**: Magento re-encrypts only config values that are a ciphertext as a
+  whole, so the credentials inside the services JSON would stay under the old key and decrypt to
+  an empty string once it is removed from `crypt/key`. Two plugins in `Plugin\EncryptionKey` hook
+  the two places Magento re-encrypts after a key change: `Key\Change::changeEncryptionKey()` (the
+  admin "Manage Encryption Key" page, 2.4.7 and its patch releases; the page is gone in 2.4.8) and
+  the `core_config_data` handler of `bin/magento encryption:data:re-encrypt` (2.4.7-p4 and later;
+  `encryption:key:change` itself only writes the new key). Both run `Model\Config\CredentialReEncryptor`,
+  which reads the raw value of every scope from `core_config_data`, re-encrypts only the fields
+  `SensitiveDataProcessor` reports as encrypted, and writes each copy back only if it still holds
+  what was read. A value that does not decrypt (or whose new ciphertext does not decrypt back) is
+  left as stored and logged with its location, never blanked. Magento_EncryptionKey is not a
+  dependency: a plugin on a class that is missing or belongs to a disabled module never runs, and
+  neither plugin class implements one of its interfaces, so `setup:di:compile` works without it.
+  Limits, the same as core's: a value pinned in `app/etc/env.php` or `config.php` is not
+  re-encrypted, and on 2.4.7 to 2.4.7-p3 `encryption:key:change` re-encrypts nothing at all.
 - **Legacy tolerance**: values without the encryptor envelope are treated as plaintext and
   pass through reads unchanged; they get encrypted on the next admin save.
 - **CSP**: all form JavaScript is emitted through `SecureHtmlRenderer` (hash/nonce), safe

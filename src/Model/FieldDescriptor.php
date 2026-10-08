@@ -15,6 +15,8 @@ class FieldDescriptor implements FieldDescriptorInterface
      * @param array<int,array{value:string,label:string}> $options
      * @param string|null $default
      * @param bool $encrypted
+     * @param bool $endpoint Whether the field names the host credentials are sent to; defaults to
+     *        false so a `create([...])` call written before the flag existed keeps working
      */
     public function __construct(
         private readonly string $name,
@@ -23,6 +25,7 @@ class FieldDescriptor implements FieldDescriptorInterface
         private readonly array $options = [],
         private readonly ?string $default = null,
         private readonly bool $encrypted = false,
+        private readonly bool $endpoint = false,
     ) {
     }
 
@@ -72,5 +75,13 @@ class FieldDescriptor implements FieldDescriptorInterface
     public function isEncrypted(): bool
     {
         return $this->encrypted;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function isEndpoint(): bool
+    {
+        return $this->endpoint;
     }
 }
