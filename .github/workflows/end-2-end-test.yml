@@ -43,11 +43,11 @@ jobs:
             IMAGE: magento-project-community-edition
             PHP_VERSION: php85-fpm
             MAGENTO_MODE: production
-          - PLATFORM: mage-os3.4.0
+          - PLATFORM: mage-os3.5.0
             IMAGE: mage-os-community-edition
             PHP_VERSION: php83-fpm
             MAGENTO_MODE: developer
-          - PLATFORM: mage-os3.4.0
+          - PLATFORM: mage-os3.5.0
             IMAGE: mage-os-community-edition
             PHP_VERSION: php85-fpm
             MAGENTO_MODE: production

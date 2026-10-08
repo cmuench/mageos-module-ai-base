@@ -19,6 +19,9 @@ jobs:
         id: supported
         with:
           project: mage-os
+          # The newest Mage-OS release. "currently-supported" resolved to an older 3.x release,
+          # while the E2E workflow already runs the newest one.
+          kind: latest
 
   # The oldest combination composer.json allows: Magento Open Source 2.4.8 (magento/framework
   # 103.0.8) on PHP 8.2. The Mage-OS matrix above only covers current Mage-OS on the PHP version
