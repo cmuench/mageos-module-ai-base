@@ -25,7 +25,7 @@ use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Chat\ChatResponse;
 use MageOS\AiBase\Model\Chat\StreamChunk;
 use MageOS\AiBase\Model\Chat\TokenUsage;
-use MageOS\AiBase\Model\Client\AiRequestNotSentException;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Client\RecordingAiClient;
 use MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClient;
 use PHPUnit\Framework\TestCase;

@@ -6,11 +6,11 @@ namespace MageOS\AiBase\Model;
 
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Phrase;
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
-use MageOS\AiBase\Model\Client\AiInvalidRequestException;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiServiceException;
-use MageOS\AiBase\Model\Client\AiTransientException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 use Psr\Log\LoggerInterface;
 
 /**

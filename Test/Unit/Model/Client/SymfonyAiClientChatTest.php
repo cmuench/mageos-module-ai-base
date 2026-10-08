@@ -15,8 +15,8 @@ use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Chat\ToolCall as AiBaseToolCall;
 use MageOS\AiBase\Model\Chat\ToolDefinition;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiRequestNotSentException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
 use MageOS\AiBase\Model\Client\OptionNormalizer;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
@@ -361,7 +361,7 @@ final class SymfonyAiClientChatTest extends TestCase
             new \Symfony\AI\Platform\Exception\AuthenticationException('Invalid API key'),
         );
 
-        $this->expectException(\MageOS\AiBase\Model\Client\AiAuthenticationException::class);
+        $this->expectException(\MageOS\AiBase\Exceptions\AiAuthenticationException::class);
 
         $this->client($platform)->chat($this->helloRequest());
     }
@@ -1187,6 +1187,39 @@ final class SymfonyAiClientChatTest extends TestCase
         $this->expectException(AiRequestNotSentException::class);
 
         $this->client($platform)->chat($this->helloRequest(), ['model' => '   ']);
+    }
+
+    /**
+     * The router refuses a model outside the bridge's catalogue before any request goes out, so
+     * the consumer and the usage log must not see it as a provider failure that was billed.
+     */
+    public function test_it_throws_request_not_sent_for_a_model_the_platform_cannot_route(): void
+    {
+        $platform = new FakePlatform(
+            null,
+            new \Symfony\AI\Platform\Exception\ModelNotFoundException('No provider found for model "gpt-9".')
+        );
+
+        $this->expectException(AiRequestNotSentException::class);
+        $this->expectExceptionMessage('cannot send a request to model "gpt-9"');
+
+        $this->client($platform)->chat($this->helloRequest(), ['model' => 'gpt-9']);
+    }
+
+    /**
+     * Streaming shares invoke() with the buffered path, so an unroutable model is refused the same
+     * way before the first chunk.
+     */
+    public function test_streaming_throws_request_not_sent_for_a_model_the_platform_cannot_route(): void
+    {
+        $platform = new FakePlatform(
+            null,
+            new \Symfony\AI\Platform\Exception\ModelNotFoundException('No provider found for model "gpt-9".')
+        );
+
+        $this->expectException(AiRequestNotSentException::class);
+
+        iterator_to_array($this->client($platform)->streamChat($this->helloRequest(), ['model' => 'gpt-9']));
     }
 
     /**

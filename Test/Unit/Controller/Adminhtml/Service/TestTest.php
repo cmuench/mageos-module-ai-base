@@ -14,7 +14,7 @@ use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\Api\AiClientFactoryInterface;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Controller\Adminhtml\Service\Test;
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
 use MageOS\AiBase\Model\FailureReporter;
 use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
 use PHPUnit\Framework\MockObject\MockObject;

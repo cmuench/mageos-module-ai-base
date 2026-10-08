@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
 use Magento\Framework\Exception\LocalizedException;
-use MageOS\AiBase\Model\Client\AiRequestNotSentException;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
 use MageOS\AiBase\Model\Client\OptionNormalizer;
 use PHPUnit\Framework\TestCase;

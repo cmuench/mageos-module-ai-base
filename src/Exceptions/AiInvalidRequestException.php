@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
+
+use MageOS\AiBase\Model\Client\AiExceptionMapper;
 
 /**
  * The provider rejected this specific request: a malformed body, a prompt over its context
@@ -14,6 +16,8 @@ namespace MageOS\AiBase\Model\Client;
  * `ExceedContextSizeException` and `ModelNotFoundException`: none of the three are recoverable by
  * waiting, which is what separates them from {@see AiTransientException} and
  * {@see AiRateLimitedException} here.
+ *
+ * @api
  */
 class AiInvalidRequestException extends AiServiceException
 {

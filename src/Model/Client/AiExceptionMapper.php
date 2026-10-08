@@ -5,6 +5,13 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Client;
 
 use Magento\Framework\Exception\LocalizedException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiContentFilteredException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiToolCallException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 
 /**
  * Translates a symfony/ai-platform failure into this module's own typed exception hierarchy.

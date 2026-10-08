@@ -13,6 +13,7 @@ use MageOS\AiBase\Api\Data\ChatResponseInterface;
 use MageOS\AiBase\Api\Data\MessageRole;
 use MageOS\AiBase\Api\Data\TokenUsageInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Chat\ChatMessage;
 use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Usage\UsageRecord;

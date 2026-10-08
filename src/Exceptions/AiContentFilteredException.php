@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
+
+use MageOS\AiBase\Model\Client\AiExceptionMapper;
 
 /**
  * The provider's safety filter refused to answer this request.
@@ -11,6 +13,8 @@ namespace MageOS\AiBase\Model\Client;
  * worth telling apart from it: a malformed request is a bug to log, a refusal is usually caused by
  * what a customer typed and is something to show them. {@see AiExceptionMapper} builds this from
  * symfony/ai's `ContentFilterException`.
+ *
+ * @api
  */
 class AiContentFilteredException extends AiInvalidRequestException
 {

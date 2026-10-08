@@ -2,9 +2,10 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
 
 use Magento\Framework\Phrase;
+use MageOS\AiBase\Model\Client\AiExceptionMapper;
 
 /**
  * The provider throttled this call: too many requests, too fast, on the configured account.
@@ -14,6 +15,8 @@ use Magento\Framework\Phrase;
  * `RateLimitExceededException`, carrying its `getRetryAfter()` value through unchanged: null on
  * every bridge that reports the failure but not a wait time (Azure, OpenRouter, LM Studio; see
  * docs/CONSUMING.md), a second count on the bridges that do.
+ *
+ * @api
  */
 class AiRateLimitedException extends AiServiceException
 {

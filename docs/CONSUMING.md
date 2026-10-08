@@ -363,7 +363,7 @@ everything without any change:
 | No service configured (at all, or for the requested code) | `create()` | `LocalizedException` |
 | No client bridge registered for the service code | `create()` | `LocalizedException` |
 | symfony/ai-platform not installed | `create()` | `LocalizedException` |
-| A call rejected before it ever reached the provider: an unsupported option, an invalid model override, a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
+| A call rejected before it ever reached the provider: an unsupported option, an invalid model override or one the service's bridge has no route to, a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
 | The provider rejected the configured credentials | `chat()` / `complete()` / `streamChat()` | `AiAuthenticationException` |
 | The provider throttled the call | `chat()` / `complete()` / `streamChat()` | `AiRateLimitedException` (`getRetryAfter(): ?int`) |
 | A server error, an overloaded model, a network failure (connection refused, DNS failure, connection reset, timeout), or a stream that ended before reporting completion | `chat()` / `complete()` / `streamChat()` | `AiTransientException` |
@@ -390,11 +390,11 @@ it (or `LocalizedException`) catches all of them, the same way it always has. Ca
 react differently per failure:
 
 ```php
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
-use MageOS\AiBase\Model\Client\AiInvalidRequestException;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiServiceException;
-use MageOS\AiBase\Model\Client\AiTransientException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 
 try {
     $response = $client->complete($prompt);

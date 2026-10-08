@@ -18,6 +18,7 @@ use MageOS\AiBase\Api\Data\StreamChunkType;
 use MageOS\AiBase\Api\Data\TokenUsageInterface;
 use MageOS\AiBase\Api\Data\ToolDefinitionInterface;
 use MageOS\AiBase\Api\Data\UsageRecordInterface;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Chat\ChatMessage;
 use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Chat\ChatResponse;
@@ -364,9 +365,38 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
 
         try {
             return $this->platform->invoke($model, $messageBag, $options);
+        } catch (\Symfony\AI\Platform\Exception\ModelNotFoundException $e) {
+            throw $this->unroutableModel($model, $e);
         } catch (\Throwable $e) {
             throw $this->wrap($e);
         }
+    }
+
+    /**
+     * A model the platform could not route to, reported as a request that never left this server.
+     *
+     * `platform->invoke()` only resolves the model and opens the HTTP request; the provider's reply,
+     * including a 404 for a model it does not serve, is read later when the result is converted. A
+     * `ModelNotFoundException` thrown here therefore always comes from the local router or
+     * catalogue, typically for a model override that is not in the bridge's catalogue. Nothing was
+     * sent or billed, so it must not reach the consumer, or the usage log, as a provider failure.
+     *
+     * @param string $model
+     * @param \Throwable $cause
+     * @return AiRequestNotSentException
+     */
+    private function unroutableModel(string $model, \Throwable $cause): AiRequestNotSentException
+    {
+        return new AiRequestNotSentException(
+            __(
+                'AI service "%1" cannot send a request to model "%2": the client has no route to it. '
+                . 'Configure the service with this model, or leave the "%3" option out.',
+                $this->serviceCode,
+                $model,
+                AiClientInterface::OPTION_MODEL
+            ),
+            $cause instanceof \Exception ? $cause : null
+        );
     }
 
     /**

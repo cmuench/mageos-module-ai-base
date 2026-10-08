@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
 
 use Magento\Framework\Exception\LocalizedException;
 
@@ -15,6 +15,8 @@ use Magento\Framework\Exception\LocalizedException;
  * `RecordingAiClient`) skips this exception type rather than logging it as a failed call. It
  * extends {@see LocalizedException} so every existing `catch (LocalizedException)` at a consumer
  * boundary keeps working unchanged.
+ *
+ * @api
  */
 class AiRequestNotSentException extends LocalizedException
 {

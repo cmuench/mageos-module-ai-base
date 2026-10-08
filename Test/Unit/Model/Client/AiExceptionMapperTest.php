@@ -4,14 +4,14 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
-use MageOS\AiBase\Model\Client\AiContentFilteredException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiContentFilteredException;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
-use MageOS\AiBase\Model\Client\AiInvalidRequestException;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiServiceException;
-use MageOS\AiBase\Model\Client\AiToolCallException;
-use MageOS\AiBase\Model\Client\AiTransientException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiToolCallException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\AI\Platform\Exception\AuthenticationException;
