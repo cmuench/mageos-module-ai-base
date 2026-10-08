@@ -28,6 +28,17 @@ final class PeriodTest extends TestCase
         self::assertSame('2026-03-15 10:00:00', $period->getEnd()->format('Y-m-d H:i:s'));
     }
 
+    public function test_it_resolves_period_boundaries_in_the_default_scope_timezone_not_the_ambient_store_one(): void
+    {
+        // Cron and CLI run with the default store view as the ambient store; the roll-up and the
+        // dashboard only agree on what "a day" is when both read Default Config's timezone.
+        $now = new \DateTimeImmutable('2026-03-15 02:30:00', new \DateTimeZone('UTC'));
+
+        $period = Period::today(new FakeTimezone('Pacific/Kiritimati', 'America/New_York'), $now);
+
+        self::assertSame('2026-03-14 10:00:00', $period->getStart()->format('Y-m-d H:i:s'));
+    }
+
     public function test_today_spans_the_local_calendar_day_as_utc_instants(): void
     {
         $now = new \DateTimeImmutable('2026-06-10 23:30:00', new \DateTimeZone('UTC'));
@@ -78,13 +89,25 @@ final class PeriodTest extends TestCase
  */
 final class FakeTimezone implements TimezoneInterface
 {
-    public function __construct(private readonly string $timezoneName)
-    {
+    /**
+     * @param string $timezoneName What Default Config answers: the reporting timezone.
+     * @param string|null $ambientStoreTimezone What any other scope answers, standing in for a
+     *        store view with its own timezone, so a test can prove the subject asks for Default
+     *        Config explicitly; null answers $timezoneName for every scope.
+     */
+    public function __construct(
+        private readonly string $timezoneName,
+        private readonly ?string $ambientStoreTimezone = null,
+    ) {
     }
 
     public function getConfigTimezone($scopeType = null, $scopeCode = null)
     {
-        return $this->timezoneName;
+        if ($scopeType === \Magento\Framework\App\Config\ScopeConfigInterface::SCOPE_TYPE_DEFAULT) {
+            return $this->timezoneName;
+        }
+
+        return $this->ambientStoreTimezone ?? $this->timezoneName;
     }
 
     public function getDefaultTimezonePath()

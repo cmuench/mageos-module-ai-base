@@ -30,9 +30,14 @@ interface UsageDailyRepositoryInterface
      * One statement for the whole batch rather than one round trip per row.
      *
      * A row matching an existing one on (`usage_date`, `service_id`, `model`, `consumer`,
-     * `store_id`) — the unique constraint task 003 declared — has its counts *replaced*, never
-     * summed: the cron recomputes a whole day from the raw rows on every run, so summing would
-     * double the totals the second time it rolls up the same day after a partial failure.
+     * `store_id`), the unique constraint task 003 declared, has its counts *added* to the stored
+     * ones, never written over them. The roll-up deletes raw rows once they are aggregated, so a
+     * later run that finds new raw rows for a day already rolled up (a row that landed late, or a
+     * reporting timezone change that moved the day boundaries) only sees part of that day; writing
+     * that part over the stored total would erase the rest for good. A nullable token count stays
+     * null only when neither side reported it. The flip side is that saving the same rows twice
+     * counts them twice, which is why {@see \MageOS\AiBase\Model\Usage\UsageMaintenance} deletes
+     * the raw rows in the same transaction and holds a lock across the whole run.
      *
      * Each row is an associative array carrying every non-identity column of
      * `mageos_ai_usage_daily`: `usage_date`, `service_id`, `service_code`, `model`, `consumer`,

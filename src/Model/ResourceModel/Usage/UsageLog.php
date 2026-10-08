@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\ResourceModel\Usage;
 
+use MageOS\AiBase\Model\Usage\ReportingTimezone;
 use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use Magento\Framework\DB\Adapter\AdapterInterface;
@@ -52,8 +53,9 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
 
     /**
      * @param Context $context
-     * @param TimezoneInterface $timezone Source of the store's configured timezone that
-     *        {@see seriesRange()} resolves every bucket boundary against.
+     * @param TimezoneInterface $timezone Source of the reporting timezone that
+     *        {@see seriesRange()} resolves every bucket boundary against; always read at Default
+     *        Config through {@see ReportingTimezone}, never the ambient store.
      * @param string|null $connectionName
      */
     public function __construct(
@@ -511,12 +513,15 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
     }
 
     /**
-     * The store's configured timezone {@see seriesRange()} resolves every bucket boundary against.
+     * The reporting timezone {@see seriesRange()} resolves every bucket boundary against.
+     *
+     * Default Config's, through {@see ReportingTimezone}, so a series drawn in the admin buckets
+     * by the same calendar days the cron roll-up wrote `usage_date` in.
      *
      * @return \DateTimeZone
      */
     private function localTimezone(): \DateTimeZone
     {
-        return new \DateTimeZone((string) $this->timezone->getConfigTimezone());
+        return ReportingTimezone::resolve($this->timezone);
     }
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
+use Magento\Framework\App\Area;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\AiServices\Azure;
@@ -28,6 +29,7 @@ use MageOS\AiBase\Model\Client\UsageNormalizer;
 use MageOS\AiBase\Model\ModelList\HttpFetcher;
 use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Model\Usage\UsageConfig;
+use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -618,7 +620,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );
@@ -672,7 +674,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );
@@ -694,7 +696,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );
@@ -717,7 +719,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );
@@ -752,7 +754,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );
@@ -787,7 +789,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
                 new FakeLogger(),
             )
         );

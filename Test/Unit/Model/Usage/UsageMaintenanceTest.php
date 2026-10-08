@@ -4,12 +4,21 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Usage;
 
+require_once __DIR__ . '/../../Stubs/InMemoryLockManager.php';
+require_once __DIR__ . '/../../Stubs/RecordingLogger.php';
+require_once __DIR__ . '/../../Stubs/DailyRowAddition.php';
+require_once __DIR__ . '/../../Stubs/FakeUsageTransaction.php';
+
 use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use MageOS\AiBase\Model\Usage\UsageMaintenance;
 use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use MageOS\AiBase\Model\Usage\UsageTransactionInterface;
+use MageOS\AiBase\Test\Unit\Stubs\FakeUsageTransaction;
+use MageOS\AiBase\Test\Unit\Stubs\DailyRowAddition;
+use MageOS\AiBase\Test\Unit\Stubs\InMemoryLockManager;
+use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
@@ -21,8 +30,10 @@ use PHPUnit\Framework\TestCase;
  *
  * Exercises the roll-up/prune sequence against {@see FakeUsageRecordRepository} and
  * {@see FakeUsageDailyRepository}, in-memory stand-ins for the two repositories, per this
- * codebase's fakes-over-mocks convention. {@see FakeTimezone} pins the store timezone so the
- * day-bucketing tests are deterministic regardless of where the suite runs.
+ * codebase's fakes-over-mocks convention. {@see FakeTimezone} pins the reporting timezone so the
+ * day-bucketing tests are deterministic regardless of where the suite runs, and can answer a
+ * different timezone for the ambient store scope to prove the default scope is the one read.
+ * {@see InMemoryLockManager} stands in for Magento's lock backend.
  */
 final class UsageMaintenanceTest extends TestCase
 {
@@ -31,6 +42,8 @@ final class UsageMaintenanceTest extends TestCase
     private FakeScopeConfig $scopeConfig;
     private UsageMaintenance $subject;
     private FakeUsageTransaction $transaction;
+    private InMemoryLockManager $lockManager;
+    private RecordingLogger $logger;
 
     protected function setUp(): void
     {
@@ -44,14 +57,9 @@ final class UsageMaintenanceTest extends TestCase
         $this->transaction = new FakeUsageTransaction();
         $this->usageRecordRepository->reportUnitsTo($this->transaction);
         $this->usageDailyRepository->reportUnitsTo($this->transaction);
-        $this->subject = new UsageMaintenance(
-            new UsageConfig($this->scopeConfig),
-            $this->usageRecordRepository,
-            $this->usageRecordRepository,
-            $this->usageDailyRepository,
-            new FakeTimezone('UTC'),
-            $this->transaction,
-        );
+        $this->lockManager = new InMemoryLockManager();
+        $this->logger = new RecordingLogger();
+        $this->subject = $this->subjectInTimezone(new FakeTimezone('UTC'));
     }
 
     public function test_it_aggregates_raw_rows_older_than_the_retention_window_into_daily_totals(): void
@@ -140,10 +148,9 @@ final class UsageMaintenanceTest extends TestCase
 
     public function test_it_writes_a_day_aggregate_and_deletes_its_raw_rows_in_one_unit(): void
     {
-        // The aggregate replaces the day's row rather than adding to it, so a delete that only
-        // got halfway would let the next run overwrite a complete total with a partial one and
-        // lose the deleted rows' tokens for good. Both halves therefore share one transaction,
-        // and the database's rollback covers them together.
+        // The aggregate is added to the day's row, so a delete that only got halfway would let
+        // the next run add the surviving rows a second time. Both halves therefore share one
+        // transaction, and the database's rollback covers them together.
         $this->usageRecordRepository->addRow($this->row(['created_at' => '2026-01-10 03:00:00']));
         $this->usageRecordRepository->addRow($this->row(['created_at' => '2026-01-11 03:00:00']));
 
@@ -166,16 +173,9 @@ final class UsageMaintenanceTest extends TestCase
         self::assertNotContains('deleteDailyOlderThan', array_merge(...$this->transaction->getUnits()));
     }
 
-    public function test_it_buckets_a_call_made_late_in_the_evening_into_the_store_timezone_day(): void
+    public function test_it_buckets_a_call_made_late_in_the_evening_into_the_reporting_timezone_day(): void
     {
-        $subject = new UsageMaintenance(
-            new UsageConfig($this->scopeConfig),
-            $this->usageRecordRepository,
-            $this->usageRecordRepository,
-            $this->usageDailyRepository,
-            new FakeTimezone('America/New_York'),
-            $this->transaction,
-        );
+        $subject = $this->subjectInTimezone(new FakeTimezone('America/New_York'));
         $this->usageRecordRepository->addRow($this->row(['created_at' => '2026-01-10 03:00:00']));
 
         $subject->run();
@@ -183,6 +183,82 @@ final class UsageMaintenanceTest extends TestCase
         $stored = $this->usageDailyRepository->getStoredRows();
         self::assertCount(1, $stored);
         self::assertSame('2026-01-09', $stored[0]['usage_date']);
+    }
+
+    public function test_it_buckets_days_in_the_default_scope_timezone_rather_than_the_ambient_store_one(): void
+    {
+        // In cron the ambient store is the default store view, whose timezone can differ from
+        // Default Config's; the dashboard reads periods at Default Config, so the roll-up must too.
+        $subject = $this->subjectInTimezone(new FakeTimezone('America/New_York', 'Asia/Tokyo'));
+        $this->usageRecordRepository->addRow($this->row(['created_at' => '2026-01-10 03:00:00']));
+
+        $subject->run();
+
+        self::assertSame('2026-01-09', $this->usageDailyRepository->getStoredRows()[0]['usage_date']);
+    }
+
+    public function test_it_adds_raw_rows_for_an_already_rolled_up_day_to_that_day_total(): void
+    {
+        $this->usageRecordRepository->addRow($this->row(['created_at' => $this->daysAgo(60, '08:00:00'), 'total_tokens' => 15]));
+        $this->subject->run();
+        $this->usageRecordRepository->addRow($this->row(['created_at' => $this->daysAgo(60, '09:00:00'), 'total_tokens' => 30]));
+
+        $this->subject->run();
+
+        $stored = $this->usageDailyRepository->getStoredRows();
+        self::assertCount(1, $stored);
+        self::assertSame(2, $stored[0]['calls']);
+        self::assertSame(45, $stored[0]['total_tokens']);
+    }
+
+    public function test_it_skips_the_run_without_touching_anything_when_another_run_holds_the_lock(): void
+    {
+        $this->lockManager->givenLockHeldElsewhere(UsageMaintenance::LOCK_NAME);
+        $this->usageRecordRepository->addRow($this->row(['created_at' => $this->daysAgo(60)]));
+        $this->usageDailyRepository->saveAggregates([$this->dailyRow(['usage_date' => $this->localDate(900)])]);
+
+        $result = $this->subject->run();
+
+        self::assertTrue($result->isSkipped());
+        self::assertCount(1, $this->usageRecordRepository->getRemainingRows());
+        self::assertCount(1, $this->usageDailyRepository->getStoredRows());
+    }
+
+    public function test_it_logs_a_notice_when_it_skips_because_another_run_holds_the_lock(): void
+    {
+        $this->lockManager->givenLockHeldElsewhere(UsageMaintenance::LOCK_NAME);
+
+        $this->subject->run();
+
+        $records = $this->logger->getRecords();
+        self::assertCount(1, $records);
+        self::assertSame('notice', $records[0]['level']);
+        self::assertStringContainsString(UsageMaintenance::LOCK_NAME, $records[0]['message']);
+    }
+
+    public function test_it_takes_the_rollup_lock_and_releases_it_after_the_run(): void
+    {
+        $this->usageRecordRepository->addRow($this->row(['created_at' => $this->daysAgo(60)]));
+
+        $result = $this->subject->run();
+
+        self::assertFalse($result->isSkipped());
+        self::assertSame([UsageMaintenance::LOCK_NAME], $this->lockManager->getRequestedNames());
+        self::assertFalse($this->lockManager->isLocked(UsageMaintenance::LOCK_NAME));
+    }
+
+    public function test_it_releases_the_rollup_lock_when_the_run_fails(): void
+    {
+        $this->usageRecordRepository->addRow($this->row(['created_at' => $this->daysAgo(60)]));
+        $this->usageRecordRepository->throwOnAggregate(new \RuntimeException('aggregate query failed'));
+
+        try {
+            $this->subject->run();
+            self::fail('Expected the aggregate failure to be rethrown.');
+        } catch (\RuntimeException) {
+        }
+
+        self::assertFalse($this->lockManager->isLocked(UsageMaintenance::LOCK_NAME));
     }
 
     public function test_it_deletes_the_raw_rows_it_aggregated(): void
@@ -304,6 +380,20 @@ final class UsageMaintenanceTest extends TestCase
         self::assertSame(90, $totalAfterRollup);
     }
 
+    private function subjectInTimezone(FakeTimezone $timezone): UsageMaintenance
+    {
+        return new UsageMaintenance(
+            new UsageConfig($this->scopeConfig),
+            $this->usageRecordRepository,
+            $this->usageRecordRepository,
+            $this->usageDailyRepository,
+            $timezone,
+            $this->transaction,
+            $this->lockManager,
+            $this->logger,
+        );
+    }
+
     /**
      * @param array<string,int|string|null> $overrides
      * @return array<string,int|string|null>
@@ -397,12 +487,22 @@ final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface,
 
     private int $nextId = 1;
 
+    private ?\Throwable $aggregateFailure = null;
+
     /**
      * @param array<string,int|string|null> $row
      */
     public function addRow(array $row): void
     {
         $this->rowsById[$this->nextId++] = $row;
+    }
+
+    /**
+     * Makes the next {@see aggregateRange()} throw $failure, standing in for a failing query.
+     */
+    public function throwOnAggregate(\Throwable $failure): void
+    {
+        $this->aggregateFailure = $failure;
     }
 
     public function save(\MageOS\AiBase\Api\Data\UsageRecordInterface $record): void
@@ -452,6 +552,10 @@ final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface,
 
     public function aggregateRange(\DateTimeInterface $from, \DateTimeInterface $to, string $usageDate): array
     {
+        if ($this->aggregateFailure !== null) {
+            throw $this->aggregateFailure;
+        }
+
         $groups = [];
         foreach ($this->rowsInWindow($from, $to) as $row) {
             $key = implode('|', [$row['service_id'], $row['model'], $row['consumer'], $row['store_id']]);
@@ -574,8 +678,8 @@ final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface,
 /**
  * In-memory stand-in for {@see UsageDailyRepositoryInterface}, keyed the same way the real
  * table's unique constraint is (`usage_date`, `service_id`, `model`, `consumer`, `store_id`), so
- * {@see saveAggregates()} replaces rather than sums a colliding row the same way the real
- * insert-on-duplicate statement does.
+ * {@see saveAggregates()} adds a colliding row's counts to the stored ones the same way the real
+ * insert-on-duplicate statement does, keeping a nullable count null only when neither side has one.
  *
  * `getList()` is not exercised by {@see UsageMaintenance} and throws.
  */
@@ -604,7 +708,9 @@ final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
                 $row['consumer'],
                 $row['store_id'],
             ]);
-            $this->rowsByKey[$key] = $row;
+            $this->rowsByKey[$key] = isset($this->rowsByKey[$key])
+                ? DailyRowAddition::add($this->rowsByKey[$key], $row)
+                : $row;
         }
     }
 
@@ -684,13 +790,25 @@ final class FakeScopeConfig implements ScopeConfigInterface
  */
 final class FakeTimezone implements TimezoneInterface
 {
-    public function __construct(private readonly string $timezoneName)
-    {
+    /**
+     * @param string $timezoneName What Default Config answers: the reporting timezone.
+     * @param string|null $ambientStoreTimezone What any other scope answers, standing in for a
+     *        store view with its own timezone, so a test can prove the subject asks for Default
+     *        Config explicitly; null answers $timezoneName for every scope.
+     */
+    public function __construct(
+        private readonly string $timezoneName,
+        private readonly ?string $ambientStoreTimezone = null,
+    ) {
     }
 
     public function getConfigTimezone($scopeType = null, $scopeCode = null)
     {
-        return $this->timezoneName;
+        if ($scopeType === \Magento\Framework\App\Config\ScopeConfigInterface::SCOPE_TYPE_DEFAULT) {
+            return $this->timezoneName;
+        }
+
+        return $this->ambientStoreTimezone ?? $this->timezoneName;
     }
 
     public function getDefaultTimezonePath()
@@ -762,60 +880,5 @@ final class FakeTimezone implements TimezoneInterface
     public function convertConfigTimeToUtc($date, $format = 'Y-m-d H:i:s')
     {
         throw new \LogicException('Not needed by UsageMaintenanceTest.');
-    }
-}
-
-/**
- * In-memory stand-in for {@see UsageTransactionInterface} that runs the unit straight through and
- * records what happened inside it.
- *
- * A fake cannot roll a real database back, and does not try to. What it can pin is the structural
- * property the production code depends on: that a day's aggregate write and the delete behind it
- * happen inside one unit, so that the database's own rollback covers both. Whether MySQL then
- * honours the transaction is MySQL's contract, not this module's.
- */
-final class FakeUsageTransaction implements UsageTransactionInterface
-{
-    /**
-     * @var array<int,string[]>
-     */
-    private array $units = [];
-
-    private ?int $currentUnit = null;
-
-    public function run(callable $work): int
-    {
-        $this->units[] = [];
-        $this->currentUnit = array_key_last($this->units);
-
-        try {
-            return $work();
-        } finally {
-            $this->currentUnit = null;
-        }
-    }
-
-    /**
-     * Called by the other fakes to note that they were used, so a test can see which calls shared
-     * a unit and which happened outside one.
-     *
-     * @param string $call
-     * @return void
-     */
-    public function record(string $call): void
-    {
-        if ($this->currentUnit === null) {
-            return;
-        }
-
-        $this->units[$this->currentUnit][] = $call;
-    }
-
-    /**
-     * @return array<int,string[]>
-     */
-    public function getUnits(): array
-    {
-        return $this->units;
     }
 }

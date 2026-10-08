@@ -210,8 +210,13 @@ override, or the client's configured one) and the consumer to attribute (the cal
 forwarding the call — a third-party delegate has never heard of it and would otherwise forward it
 straight into the provider's request body, which OpenAI-compatible endpoints reject with a 400 —
 then writes one `UsageRecordRepositoryInterface::save()` call with the resolved model, resolved
-consumer, the current store id (`0` when no store is in scope, which is what cron, CLI and
-adminhtml already mean by that column elsewhere), and whatever the call produced. **A row is
+consumer, the store id `Model\Usage\UsageStoreResolver` attributes the call to, and whatever the
+call produced. In a storefront area (`frontend`, `webapi_rest`, `webapi_soap`, `graphql`) that is
+the current store. Anywhere else (admin, cron, CLI, no area) it is `0`, unless the current store
+differs from the default store view, which means the code emulated a specific store on purpose; the
+store resolver reports the default store view in cron and CLI even when nothing chose it, which is
+why that one cannot be taken at face value. Emulating the default store view itself is therefore
+recorded as `0`. **A row is
 written whether the call succeeded, failed after reaching the provider, or succeeded while
 reporting no usage at all**: a successful response's `TokenUsageInterface` (`null` when the
 provider reported nothing), or `null` usage with the `failed` flag set when the delegate threw.
@@ -251,17 +256,23 @@ behind a chat call).
 
 1. **Roll up, then delete, one whole local day at a time**, oldest first, for every day strictly
    older than `retention_days` and at or after the oldest row still in `mageos_ai_usage_log`.
-   Each day's window is resolved once in the store timezone
-   (`TimezoneInterface::getConfigTimezone()` plus plain `\DateTimeImmutable`/`\DateTimeZone`
+   Each day's window is resolved once in the reporting timezone, Default Config's, read through
+   `Model\Usage\ReportingTimezone` with the scope pinned explicitly so cron (whose ambient store is
+   the default store view) and the admin dashboard agree on it
+   (`TimezoneInterface::getConfigTimezone('default')` plus plain `\DateTimeImmutable`/`\DateTimeZone`
    arithmetic — never SQL's `DATE()` or `CONVERT_TZ()`, so a MySQL instance with no timezone
    tables loaded still gets the right boundary and a daylight-saving transition still produces
    exactly one 23- or 25-hour bucket) and converted to a UTC `[start, end)` pair.
    `UsageRecordReportInterface::aggregateRange()` produces one row per
    (`service_id`, `service_code`, `model`, `consumer`, `store_id`) grouping key for that day, which
-   `UsageDailyRepositoryInterface::saveAggregates()` writes with an insert-or-update that
-   *replaces* an existing row's counts rather than summing onto them — the whole day is always
-   recomputed from the raw rows still present, so summing would double-count a day rolled up twice
-   after a partial failure. Only once that write has succeeded does
+   `UsageDailyRepositoryInterface::saveAggregates()` writes with an insert-or-update that *adds* to
+   an existing row's counts (a nullable token count stays null only when neither side has one).
+   Replacing would be wrong: the raw rows behind a stored total are already deleted, so a later
+   run that finds new raw rows for that day (a late row, a reporting timezone change) only sees
+   part of it and would overwrite the full total with the partial one. Adding requires each raw row
+   to be added exactly once, which the per-day transaction and a `LockManagerInterface` lock named
+   `mageos_ai_usage_rollup`, held for the whole run, guarantee; a run that cannot take the lock is
+   skipped and logged at notice level. Only once that write has succeeded does
    `UsageRecordRepositoryInterface::deleteOlderThan()` remove that day's raw rows, in bounded
    batches (a store with months of history should not hold a lock for minutes deleting it in one
    statement). Roll-up before delete is the one ordering rule this class exists to enforce: reversed,
@@ -281,7 +292,7 @@ not retention of what was already recorded.
 | `mageos_ai/services/configuration` | JSON `{rowId: {serviceCode: {field: value}}}`; flagged fields encrypted |
 | `mageos_ai/services/models/<code>` | JSON `{models: {value: label}, fetched_at: <ts>}` from the last manual refresh |
 | `mageos_ai_usage_log` table | One row per call the client actually sent: succeeded, failed after reaching the provider, or succeeded reporting no usage. Never for a call `AiRequestNotSentException` rejected before it reached the provider. Columns: service id/code, model, consumer, store id, six independently-nullable token counts (prompt, completion, total, cache read, cache write, reasoning), whether it streamed, whether it failed, `created_at`. Counts and metadata only, see the decision record below |
-| `mageos_ai_usage_daily` table | One row per (`usage_date`, service id, model, consumer, store id) grouping key per day, written by the roll-up cron; `usage_date` is a store-timezone calendar date, not `DATE(created_at)`. Carries the same six token counts plus `calls` and `failed_calls` |
+| `mageos_ai_usage_daily` table | One row per (`usage_date`, service id, model, consumer, store id) grouping key per day, written by the roll-up cron; `usage_date` is a calendar date in the reporting timezone (Default Config's), not `DATE(created_at)`. Carries the same six token counts plus `calls` and `failed_calls` |
 
 Row IDs are opaque strings generated by the form (`_<time>_<ms>`) and preserved across
 saves so credential restore can match rows.

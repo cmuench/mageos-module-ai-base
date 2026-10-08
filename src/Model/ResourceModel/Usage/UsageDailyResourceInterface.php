@@ -21,7 +21,11 @@ namespace MageOS\AiBase\Model\ResourceModel\Usage;
 interface UsageDailyResourceInterface
 {
     /**
-     * Inserts or updates a batch of daily aggregate rows in one statement.
+     * Inserts or adds to a batch of daily aggregate rows in one statement.
+     *
+     * A row colliding with a stored one on the grouping key has its counts added to the stored
+     * counts, never written over them; see
+     * {@see \MageOS\AiBase\Api\UsageDailyRepositoryInterface::saveAggregates()} for why.
      *
      * @param array<int,array<string,int|string|null>> $rows
      * @return void

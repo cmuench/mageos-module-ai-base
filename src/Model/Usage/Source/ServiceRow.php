@@ -5,32 +5,30 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Usage\Source;
 
 use Magento\Framework\Data\OptionSourceInterface;
-use MageOS\AiBase\Api\AiServiceSelectorInterface;
-use MageOS\AiBase\Api\Data\AiServiceInterface;
-use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\Usage\ServiceRowLabels;
 
 /**
  * Option source for the usage listing's service filter (task 015).
  *
- * The stored column it filters, `service_id`, is {@see AiServiceInterface::getId()}: an opaque
- * JSON object key that means nothing to an administrator reading the filter list. Each option's
- * label is instead the human provider name {@see ServiceRegistry} has for the row's code, so
- * picking a row is picking "OpenAI" rather than a row key nobody chose for readability.
+ * The stored column it filters, `service_id`, is
+ * {@see \MageOS\AiBase\Api\Data\AiServiceInterface::getId()}: an opaque JSON object key that
+ * means nothing to an administrator reading the filter list. Each option is labelled through
+ * {@see ServiceRowLabels} instead, the same labels the dashboard's charts use: the row's own name,
+ * else its provider name, with the id appended when two rows would otherwise read the same. Two
+ * Anthropic rows called "Chat AI" and "Summaries" are therefore two distinguishable options rather
+ * than two identical "Anthropic" entries.
  *
- * Lists the currently configured rows through {@see AiServiceSelectorInterface::getAll()} rather
- * than a distinct query over the usage table: the row a historical call was served through is
- * still the row an administrator wants to find it by, and this is the same source the admin form
- * itself reads its rows from.
+ * Lists the currently configured rows rather than a distinct query over the usage table: the row
+ * a historical call was served through is still the row an administrator wants to find it by, and
+ * this is the same source the admin form itself reads its rows from.
  */
 class ServiceRow implements OptionSourceInterface
 {
     /**
-     * @param AiServiceSelectorInterface $serviceSelector Currently configured service rows
-     * @param ServiceRegistry $serviceRegistry Registered backends, for the human-readable label
+     * @param ServiceRowLabels $serviceRowLabels Unique human label per configured row
      */
     public function __construct(
-        private readonly AiServiceSelectorInterface $serviceSelector,
-        private readonly ServiceRegistry $serviceRegistry,
+        private readonly ServiceRowLabels $serviceRowLabels,
     ) {
     }
 
@@ -41,27 +39,15 @@ class ServiceRow implements OptionSourceInterface
      */
     public function toOptionArray(): array
     {
-        return array_map(
-            fn (AiServiceInterface $service): array => [
-                'value' => $service->getId(),
-                'label' => $this->getLabel($service),
-            ],
-            $this->serviceSelector->getAll(),
-        );
-    }
+        $labels = $this->serviceRowLabels->getConfiguredLabels();
 
-    /**
-     * Human provider name for a row's code, falling back to the raw code.
-     *
-     * Falls back when the provider that registered the code is no longer installed: a row can
-     * outlive the module that registered it, and its historical usage rows should still resolve
-     * to a readable option.
-     *
-     * @param AiServiceInterface $service
-     * @return string
-     */
-    private function getLabel(AiServiceInterface $service): string
-    {
-        return $this->serviceRegistry->get($service->getCode())?->getName() ?? $service->getCode();
+        return array_map(
+            fn (int|string $serviceId, string $label): array => [
+                'value' => (string) $serviceId,
+                'label' => $label,
+            ],
+            array_keys($labels),
+            $labels,
+        );
     }
 }

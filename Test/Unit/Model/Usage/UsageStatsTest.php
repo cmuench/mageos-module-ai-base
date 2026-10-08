@@ -389,6 +389,20 @@ final class UsageStatsTest extends TestCase
         self::assertSame('2026-01-01', $this->dailyUsageReport->lastSumFrom());
     }
 
+    public function test_it_asks_the_daily_table_for_dates_in_the_default_scope_timezone(): void
+    {
+        $subject = new UsageStats(
+            $this->rawUsageRepository,
+            $this->rawUsageRepository,
+            $this->dailyUsageReport,
+            new FakeStatsTimezone('Europe/Amsterdam', 'America/New_York')
+        );
+
+        $subject->getTotals($this->period('2025-12-31 23:00:00', '2026-12-31 23:00:00'));
+
+        self::assertSame('2026-01-01', $this->dailyUsageReport->lastSumFrom());
+    }
+
     public function test_it_returns_one_dense_series_per_consumer(): void
     {
         $this->rawUsageRepository->addRow($this->rawRow([
@@ -1057,13 +1071,25 @@ final class FakeDailyUsageReport implements UsageDailyReportInterface
  */
 final class FakeStatsTimezone implements \Magento\Framework\Stdlib\DateTime\TimezoneInterface
 {
-    public function __construct(private readonly string $timezone)
-    {
+    /**
+     * @param string $timezone What Default Config answers: the reporting timezone.
+     * @param string|null $ambientStoreTimezone What any other scope answers, standing in for a
+     *        store view with its own timezone, so a test can prove the subject asks for Default
+     *        Config explicitly; null answers $timezone for every scope.
+     */
+    public function __construct(
+        private readonly string $timezone,
+        private readonly ?string $ambientStoreTimezone = null,
+    ) {
     }
 
     public function getConfigTimezone($scopeType = null, $scopeCode = null)
     {
-        return $this->timezone;
+        if ($scopeType === \Magento\Framework\App\Config\ScopeConfigInterface::SCOPE_TYPE_DEFAULT) {
+            return $this->timezone;
+        }
+
+        return $this->ambientStoreTimezone ?? $this->timezone;
     }
 
     public function getDefaultTimezonePath()

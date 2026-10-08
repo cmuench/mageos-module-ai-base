@@ -6,6 +6,8 @@ namespace MageOS\AiBase\Test\Unit\Model\Client;
 
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
+use Magento\Framework\App\Area;
+use Magento\Framework\App\State;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\Exception\NoSuchEntityException;
 use Magento\Store\Api\Data\StoreExtensionInterface;
@@ -28,6 +30,8 @@ use MageOS\AiBase\Model\Chat\TokenUsage;
 use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Client\RecordingAiClient;
 use MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClient;
+use MageOS\AiBase\Model\Usage\UsageStoreResolver;
+use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 use Symfony\AI\Platform\PlatformInterface;
@@ -37,9 +41,13 @@ use Symfony\AI\Platform\Test\InMemoryPlatform;
  * @covers \MageOS\AiBase\Model\Client\RecordingAiClient
  * @covers \MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClient
  *
+ * @covers \MageOS\AiBase\Model\Usage\UsageStoreResolver
+ *
  * Exercises the decorators against {@see FakeAiClient}, {@see FakeUsageRecordRepository},
- * {@see FakeStoreManager} and {@see FakeLogger}, in-memory stand-ins for the collaborators per this
- * codebase's fakes-over-mocks convention, kept next to the test that uses them.
+ * {@see FakeStoreManager}, {@see FakeAppState} and {@see FakeLogger}, in-memory stand-ins for the
+ * collaborators per this codebase's fakes-over-mocks convention, kept next to the test that uses
+ * them. The store attribution rule is driven through the real {@see UsageStoreResolver}, since
+ * which store a row lands under is only observable on the row the client records.
  */
 final class RecordingAiClientTest extends TestCase
 {
@@ -162,6 +170,67 @@ final class RecordingAiClientTest extends TestCase
 
         $this->subject($delegate, new FakeStoreManager(null))->chat($this->request());
 
+        self::assertSame(0, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    #[TestWith([Area::AREA_FRONTEND])]
+    #[TestWith([Area::AREA_WEBAPI_REST])]
+    #[TestWith([Area::AREA_WEBAPI_SOAP])]
+    #[TestWith([Area::AREA_GRAPHQL])]
+    public function test_it_records_the_current_store_in_a_storefront_area(string $areaCode): void
+    {
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(3, 1), new FakeAppState($areaCode))
+            ->chat($this->request());
+
+        self::assertSame(3, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    public function test_it_records_the_default_store_view_for_a_storefront_request_made_in_it(): void
+    {
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(1, 1), new FakeAppState(Area::AREA_FRONTEND))
+            ->chat($this->request());
+
+        self::assertSame(1, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    #[TestWith([Area::AREA_CRONTAB])]
+    #[TestWith([Area::AREA_ADMINHTML])]
+    public function test_it_records_the_admin_store_outside_a_storefront_when_the_current_store_is_the_default_store_view(
+        string $areaCode
+    ): void {
+        // Cron and CLI resolve the default store view as the current store although nothing chose
+        // it; recording it would put all of that spend on the default store view.
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(1, 1), new FakeAppState($areaCode))
+            ->chat($this->request());
+
+        self::assertSame(0, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    public function test_it_records_the_admin_store_when_no_area_code_is_set(): void
+    {
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(1, 1), new FakeAppState(null))
+            ->chat($this->request());
+
+        self::assertSame(0, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    public function test_it_records_the_store_a_cron_job_emulates_when_it_is_not_the_default_store_view(): void
+    {
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(2, 1), new FakeAppState(Area::AREA_CRONTAB))
+            ->chat($this->request());
+
+        self::assertSame(2, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    public function test_it_records_the_admin_store_and_still_answers_when_the_default_store_view_cannot_be_resolved(): void
+    {
+        $storeManager = new FakeStoreManager(2, 1);
+        $storeManager->givenDefaultStoreViewLookupFails(new \RuntimeException('store table unavailable'));
+
+        $response = $this->subject($this->succeedingDelegate(), $storeManager, new FakeAppState(Area::AREA_CRONTAB))
+            ->chat($this->request());
+
+        self::assertSame('Hi', $response->getText());
         self::assertSame(0, $this->repository->getSavedRecords()[0]->getStoreId());
     }
 
@@ -419,7 +488,7 @@ final class RecordingAiClientTest extends TestCase
         $subject = new RecordingPlatformAwareAiClient(
             $delegate,
             $this->repository,
-            new FakeStoreManager(1),
+            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
             $this->logger,
         );
 
@@ -433,7 +502,7 @@ final class RecordingAiClientTest extends TestCase
         $subject = new RecordingPlatformAwareAiClient(
             $delegate,
             $this->repository,
-            new FakeStoreManager(1),
+            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
             $this->logger,
         );
 
@@ -478,14 +547,25 @@ final class RecordingAiClientTest extends TestCase
         self::assertCount(1, $this->logger->getRecords());
     }
 
-    private function subject(FakeAiClient $delegate, ?StoreManagerInterface $storeManager = null): RecordingAiClient
-    {
+    private function subject(
+        FakeAiClient $delegate,
+        ?StoreManagerInterface $storeManager = null,
+        ?State $appState = null,
+    ): RecordingAiClient {
         return new RecordingAiClient(
             $delegate,
             $this->repository,
-            $storeManager ?? new FakeStoreManager(1),
+            new UsageStoreResolver(
+                $storeManager ?? new FakeStoreManager(1),
+                $appState ?? new FakeAppState(Area::AREA_FRONTEND),
+            ),
             $this->logger,
         );
+    }
+
+    private function succeedingDelegate(): FakeAiClient
+    {
+        return new FakeAiClient(chatResponse: new ChatResponse('Hi', [], new TokenUsage(10, 5)));
     }
 
     private function request(): ChatRequestInterface
@@ -690,12 +770,26 @@ class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
 
 /**
  * In-memory stand-in for {@see StoreManagerInterface}, kept next to the test that uses it. Only
- * getStore() is exercised by {@see RecordingAiClient}.
+ * getStore() and getDefaultStoreView() are exercised by {@see UsageStoreResolver}.
  */
 class FakeStoreManager implements StoreManagerInterface
 {
-    public function __construct(private readonly ?int $storeId)
+    private ?\Throwable $defaultStoreViewFailure = null;
+
+    /**
+     * @param int|null $storeId The current store; null makes getStore() throw, as it does when no
+     *        store can be resolved
+     * @param int|null $defaultStoreViewId The default store view; null when the install has none
+     */
+    public function __construct(
+        private readonly ?int $storeId,
+        private readonly ?int $defaultStoreViewId = 1,
+    ) {
+    }
+
+    public function givenDefaultStoreViewLookupFails(\Throwable $failure): void
     {
+        $this->defaultStoreViewFailure = $failure;
     }
 
     public function getStore($storeId = null)
@@ -744,7 +838,11 @@ class FakeStoreManager implements StoreManagerInterface
 
     public function getDefaultStoreView()
     {
-        throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
+        if ($this->defaultStoreViewFailure !== null) {
+            throw $this->defaultStoreViewFailure;
+        }
+
+        return $this->defaultStoreViewId === null ? null : new FakeStore($this->defaultStoreViewId);
     }
 
     public function getGroup($groupId = null)
@@ -760,6 +858,28 @@ class FakeStoreManager implements StoreManagerInterface
     public function setCurrentStore($store)
     {
         throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
+    }
+}
+
+/**
+ * Stand-in for {@see State}, which is a concrete class with no interface to fake behind. Only
+ * getAreaCode() is exercised by {@see UsageStoreResolver}, so this subclass answers it from its
+ * own constructor argument and skips the parent constructor, whose collaborators nothing here
+ * reaches. A null area code throws the way the real one does before any area is set.
+ */
+class FakeAppState extends State
+{
+    public function __construct(private readonly ?string $fakeAreaCode)
+    {
+    }
+
+    public function getAreaCode()
+    {
+        if ($this->fakeAreaCode === null) {
+            throw new LocalizedException(__('Area code is not set'));
+        }
+
+        return $this->fakeAreaCode;
     }
 }
 

@@ -38,8 +38,9 @@ class UsageStats implements UsageStatsInterface
      *        range aggregation.
      * @param UsageDailyReportInterface $dailyUsageReport The aggregated `mageos_ai_usage_daily`
      *        side.
-     * @param \Magento\Framework\Stdlib\DateTime\TimezoneInterface $timezone Store timezone the daily
-     *        table's window bounds are resolved in; see {@see localBound()}.
+     * @param \Magento\Framework\Stdlib\DateTime\TimezoneInterface $timezone Source of the
+     *        reporting timezone the daily table's window bounds are resolved in; see
+     *        {@see localBound()} and {@see ReportingTimezone}.
      */
     public function __construct(
         private readonly UsageRecordRepositoryInterface $rawUsageRepository,
@@ -241,10 +242,11 @@ class UsageStats implements UsageStatsInterface
     }
 
     /**
-     * A window bound restated in the store's own timezone.
+     * A window bound restated in the reporting timezone.
      *
-     * `mageos_ai_usage_daily.usage_date` holds the *store-local* calendar date the roll-up
-     * computed, while a {@see Period} bound is a UTC instant. The daily repository turns its
+     * `mageos_ai_usage_daily.usage_date` holds the calendar date the roll-up computed in the
+     * reporting timezone {@see ReportingTimezone} pins to Default Config, while a {@see Period}
+     * bound is a UTC instant. The daily repository turns its
      * arguments into a date with `format('Y-m-d')`, so handing it a UTC instant asks for the wrong
      * day wherever the store is not on UTC: in Europe/Amsterdam the local first of January is
      * 23:00 UTC on the thirty-first of December, and a year-to-date window would open a day early
@@ -257,7 +259,7 @@ class UsageStats implements UsageStatsInterface
      */
     private function localBound(\DateTimeImmutable $instant): \DateTimeImmutable
     {
-        return $instant->setTimezone(new \DateTimeZone($this->timezone->getConfigTimezone()));
+        return $instant->setTimezone(ReportingTimezone::resolve($this->timezone));
     }
 
     /**

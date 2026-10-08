@@ -99,8 +99,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`etc/crontab.xml`, schedule at `mageos_ai/usage/cron_expr`): rolls up every whole local day of
   the raw log older than the configured retention into the daily table, deletes exactly the raw
   rows it rolled up, then prunes daily rows past their own (longer) retention — in that order,
-  non-negotiably, since reversing it would mean silent data loss. Day boundaries are computed in
-  PHP from the store's configured timezone with plain `\DateTimeImmutable`/`\DateTimeZone`
+  non-negotiably, since reversing it would mean silent data loss. Each day's totals are added to
+  whatever that day already holds, never written over it, so raw rows that reach an already
+  rolled-up day still count; a `mageos_ai_usage_rollup` lock keeps two runs from adding the same
+  rows twice. Day boundaries are computed in
+  PHP from the Default Config timezone with plain `\DateTimeImmutable`/`\DateTimeZone`
   arithmetic, never SQL's `DATE()` or `CONVERT_TZ()`, so a customer install with no MySQL timezone
   tables loaded still gets a correct boundary and a daylight-saving transition still produces
   exactly one bucket.
@@ -117,7 +120,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   table or tables the window touches and merges the result without ever double-counting a day
   present in both. `Api\Data\Period` is an immutable `[start, end)` UTC window with named
   constructors (`today()`, `thisMonth()`, `thisYear()`) that resolve local calendar boundaries in
-  the store timezone before converting once to UTC; `Api\Data\Granularity` (`Day`/`Month`) drives
+  the Default Config timezone, the one the roll-up buckets days in too, before converting once to
+  UTC; `Api\Data\Granularity` (`Day`/`Month`) drives
   `getTimeSeries()`, which always returns one bucket per calendar unit in the period, including
   a bucket with no recorded usage, so a caller feeding it straight into a graph never fills a gap
   itself.

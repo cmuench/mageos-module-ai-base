@@ -145,13 +145,32 @@ The page has two parts:
     to the end of the calendar period, so the remainder of an unfinished month is not drawn as a
     fall to zero.
   - **Two bar charts** breaking the period down by consumer and by service row.
+
+  A service row is shown under the name it was given in the configuration form ("Chat AI"),
+  falling back to its provider name ("Anthropic") when it has none, and to its raw row id once it
+  is no longer configured at all. Two rows that would still read the same, such as two unnamed
+  Anthropic rows, get their row id appended ("Anthropic (_1712345)"), so every row keeps its own
+  line and its own bar. The grid's service filter uses the same names.
 - **A grid** below it, listing individual calls with their date, consumer, service, model and
   token counts, filterable and sortable like any other admin grid.
 
 A **store selector** sits beside the period one and narrows every number on the page, the trend
 included, to a single scope. Alongside the store views it offers **Admin, cron and CLI**, which is
-where every call made outside a storefront is recorded and on most installs is the bulk of the
-traffic. A URL naming a store that no longer exists falls back to every store rather than to none,
+where every call made outside a storefront is recorded (store id 0) and on most installs is the
+bulk of the traffic.
+
+Which store a call is recorded under:
+
+- **Storefront requests** (the `frontend`, `webapi_rest`, `webapi_soap` and `graphql` areas) are
+  recorded under the store the request was made in.
+- **Everything else** (admin, cron, CLI, or code running with no area set) is recorded under store
+  0, *unless* that code switched to a store other than the default store view, for example a cron
+  job emulating store 2 to generate that store's product descriptions. That call is recorded under
+  store 2, because the spend genuinely belongs to it.
+- **Known limitation:** outside a storefront, Magento reports the default store view as the
+  current store even when nothing chose it, so code that deliberately emulates the default store
+  view itself cannot be told apart from code that emulates nothing. Its calls are recorded under
+  store 0, not under the default store view. A URL naming a store that no longer exists falls back to every store rather than to none,
 so a stale bookmark shows a total that is too broad, which a reader can see, rather than an empty
 page.
 
@@ -215,14 +234,38 @@ notice above the grid.
 
 ### Bucketing and timezones
 
-Days are bucketed in the **store timezone**, computed in PHP from the store's configured
-timezone — never in the database with `DATE()` or `CONVERT_TZ()`, which depend on timezone tables
-a customer's MySQL is not guaranteed to have loaded. This is why a call made late in the evening
-lands on the calendar date a merchant looking at the clock on their own wall would expect, rather
-than on whatever date UTC happens to be at that same instant. It is also why the boundary is
-correct across a daylight-saving transition: the day it falls on is still exactly one bucket,
-computed from real calendar arithmetic in the store's actual timezone rather than a fixed
-UTC offset.
+Usage reporting uses **one reporting timezone for the whole install: the timezone set at Default
+Config**, under **Stores > Configuration > General > General > Locale Options > Timezone** with the
+scope switcher on *Default Config*. A timezone set on a website or store view is deliberately
+ignored here. Every day the roll-up writes, and every day, month and year the dashboard, the trend
+and the CLI report draw, is a calendar day in that one timezone. That is what keeps them agreeing:
+the roll-up runs from cron and the dashboard is read in the admin, and if each followed whichever
+store happened to be current, a store view with its own timezone would make cron write days the
+dashboard does not ask for.
+
+Days are computed in PHP, never in the database with `DATE()` or `CONVERT_TZ()`, which depend on
+timezone tables a customer's MySQL is not guaranteed to have loaded. This is why a call made late
+in the evening lands on the calendar date a merchant looking at the clock on their own wall would
+expect, rather than on whatever date UTC happens to be at that same instant. It is also why the
+boundary is correct across a daylight-saving transition: the day it falls on is still exactly one
+bucket, computed from real calendar arithmetic in the reporting timezone rather than a fixed UTC
+offset.
+
+Changing the Default Config timezone does not move days already rolled up: those are stored as
+plain dates. Calls still in the raw table are bucketed in the new timezone when their day is rolled
+up, and if such a day already has a daily total, the new calls are added to it rather than replacing
+it.
+
+### How the daily roll-up writes
+
+The roll-up **adds** each day's totals to whatever that day already holds, rather than writing over
+it. The raw rows behind a daily total are deleted once rolled up, so a later run that finds more raw
+rows for a day already rolled up (one that landed late, or a timezone change that moved a day
+boundary) only ever sees part of that day; overwriting would erase the rest for good. Adding is only
+safe if no raw row is counted twice, so each day's write and the delete of its raw rows commit in
+one transaction, and the whole run holds a named lock (`mageos_ai_usage_rollup`). A run that finds
+the lock already taken, because an earlier run is still busy, does nothing and logs a notice saying
+so; the next scheduled run picks up whatever is left.
 
 ### Turning tracking off
 
