@@ -162,6 +162,11 @@ the mapping is safe to ship even when your bridge package is not installed. `pac
 form tells an administrator to install when the bridge is missing; a provider with no released
 bridge omits it and is labelled unsupported instead.
 
+`model_override` (boolean, default `true`) says whether a call can run against another model than
+the configured one. Set it to `false` when the bridge fixes the model at platform creation, as
+Azure's does with its deployment; an override then throws `AiRequestNotSentException` instead of
+being silently ignored.
+
 `dialect` names the request-option shape your provider speaks, which decides how the universal
 options (`max_tokens`, `temperature`, `top_p`, `stop`, `tool_choice`, `reasoning_effort`) are
 spelled on the wire — see [CONSUMING.md](CONSUMING.md#options). The shipped dialects are

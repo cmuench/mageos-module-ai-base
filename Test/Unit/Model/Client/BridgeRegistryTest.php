@@ -115,4 +115,27 @@ final class BridgeRegistryTest extends TestCase
 
         self::assertTrue($registry->isCacheOutsidePrompt('acmeai'));
     }
+
+    /**
+     * Every bridge that takes the model per request allows an override, so a bridge that says
+     * nothing about it must too.
+     */
+    public function test_it_allows_a_model_override_when_the_flag_is_missing(): void
+    {
+        $registry = new BridgeRegistry(['openai' => ['factory' => 'SomeFactory']]);
+
+        self::assertTrue($registry->allowsModelOverride('openai'));
+    }
+
+    /**
+     * Azure's platform is built for one deployment, so di.xml switches overrides off for it.
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['false'])]
+    public function test_it_refuses_a_model_override_for_a_bridge_that_switches_it_off(bool|string $flag): void
+    {
+        $registry = new BridgeRegistry(['azure' => ['model_override' => $flag]]);
+
+        self::assertFalse($registry->allowsModelOverride('azure'));
+    }
 }

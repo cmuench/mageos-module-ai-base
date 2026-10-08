@@ -438,7 +438,8 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      *
      * @param array<string,mixed> $options
      * @return non-empty-string
-     * @throws AiRequestNotSentException When the caller names a model that is not a usable name
+     * @throws AiRequestNotSentException When the caller names a model that is not a usable name, or
+     *         another model on a bridge that cannot switch models per call
      */
     private function modelFor(array $options): string
     {
@@ -454,6 +455,16 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
                 . 'Leave it out to use the model the service is configured with.',
                 AiClientInterface::OPTION_MODEL,
                 $this->serviceCode
+            ));
+        }
+
+        if ($model !== $this->model && !$this->bridgeRegistry->allowsModelOverride($this->serviceCode)) {
+            throw new AiRequestNotSentException(__(
+                'AI service "%1" sends every call to the model it is configured with, so the "%2" '
+                . 'option cannot switch it to "%3". Configure another "%1" service for that model instead.',
+                $this->serviceCode,
+                AiClientInterface::OPTION_MODEL,
+                $model
             ));
         }
 
@@ -580,10 +591,41 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
                 // by the consumer at runtime and only the provider can rule on it, so the shape is
                 // unprovable here; restating it would reject valid schemas Symfony left out.
                 // @phpstan-ignore argument.type
-                $tool->getParameters(),
+                $this->withObjectProperties($tool->getParameters()),
             ),
             $tools,
         );
+    }
+
+    /**
+     * A JSON Schema whose empty `properties` maps encode as `{}` rather than `[]`.
+     *
+     * PHP has one array type, so a tool that takes no arguments (and every nested object schema
+     * without properties) holds `'properties' => []`, which json_encode writes as a JSON array.
+     * Providers that validate the schema reject that, since `properties` must be an object. The
+     * bridges pass the schema through unchanged, so this is the last place to fix it.
+     *
+     * @param array<mixed> $schema
+     * @return array<mixed>
+     */
+    private function withObjectProperties(array $schema): array
+    {
+        if (array_key_exists('properties', $schema) && is_array($schema['properties'])) {
+            $schema['properties'] = $schema['properties'] === []
+                ? new \stdClass()
+                : array_map(
+                    fn (mixed $property): mixed => is_array($property)
+                        ? $this->withObjectProperties($property)
+                        : $property,
+                    $schema['properties'],
+                );
+        }
+
+        if (isset($schema['items']) && is_array($schema['items'])) {
+            $schema['items'] = $this->withObjectProperties($schema['items']);
+        }
+
+        return $schema;
     }
 
     /**

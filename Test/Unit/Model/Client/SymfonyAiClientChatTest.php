@@ -257,6 +257,52 @@ final class SymfonyAiClientChatTest extends TestCase
         self::assertSame(['type' => 'object'], $tools[0]->getParameters());
     }
 
+    /**
+     * A tool without arguments holds `'properties' => []`, which json_encode writes as a JSON
+     * array; providers that validate the schema reject that, since `properties` must be an object.
+     */
+    public function test_sends_the_properties_of_a_tool_without_arguments_as_a_json_object(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+        $request = new ChatRequest(
+            [new ChatMessage(MessageRole::User, 'Hello')],
+            [new ToolDefinition('count_orders', 'Counts every order')],
+        );
+
+        $this->client($platform)->chat($request);
+
+        self::assertSame(
+            '{"type":"object","properties":{}}',
+            json_encode($platform->options['tools'][0]->getParameters())
+        );
+    }
+
+    /**
+     * Nested object schemas, directly or as array items, hit the same encoding problem.
+     */
+    public function test_sends_empty_nested_properties_as_json_objects_too(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+        $request = new ChatRequest(
+            [new ChatMessage(MessageRole::User, 'Hello')],
+            [new ToolDefinition('tag_orders', 'Tags orders', [
+                'type' => 'object',
+                'properties' => [
+                    'filter' => ['type' => 'object', 'properties' => []],
+                    'tags' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => []]],
+                ],
+            ])],
+        );
+
+        $this->client($platform)->chat($request);
+
+        self::assertSame(
+            '{"type":"object","properties":{"filter":{"type":"object","properties":{}},'
+            . '"tags":{"type":"array","items":{"type":"object","properties":{}}}}}',
+            json_encode($platform->options['tools'][0]->getParameters())
+        );
+    }
+
     public function test_sends_no_tools_key_when_none_were_offered(): void
     {
         $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
@@ -1057,6 +1103,20 @@ final class SymfonyAiClientChatTest extends TestCase
      * A normalizer wired the way di.xml wires it, so cache-outside-prompt behavior matches
      * production for any test that builds a client through {@see client()} directly.
      */
+    private function azureClient(FakePlatform $platform): SymfonyAiClient
+    {
+        return new SymfonyAiClient(
+            $platform,
+            'gpt-4o',
+            'azure',
+            '_row_1',
+            $this->optionNormalizer(),
+            $this->usageNormalizer(),
+            new AiExceptionMapper(),
+            new BridgeRegistry(['azure' => ['model_override' => false]]),
+        );
+    }
+
     private function usageNormalizer(): UsageNormalizer
     {
         return new UsageNormalizer(new BridgeRegistry(['anthropic' => ['cache_outside_prompt' => true]]));
@@ -1213,6 +1273,32 @@ final class SymfonyAiClientChatTest extends TestCase
         $this->expectExceptionMessage('cannot send a request to model "gpt-9"');
 
         $this->client($platform)->chat($this->helloRequest(), ['model' => 'gpt-9']);
+    }
+
+    /**
+     * Azure's platform always sends its configured deployment as the model, so an override would
+     * be ignored while the usage log booked it to a model that never ran.
+     */
+    public function test_it_refuses_a_model_override_on_a_bridge_that_cannot_switch_models(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+
+        $this->expectException(AiRequestNotSentException::class);
+        $this->expectExceptionMessage('cannot switch it to "gpt-4o-mini"');
+
+        $this->azureClient($platform)->chat($this->helloRequest(), ['model' => 'gpt-4o-mini']);
+    }
+
+    /**
+     * Naming the model the row is already configured with is not an override at all.
+     */
+    public function test_it_accepts_the_configured_model_as_an_override_on_a_bridge_that_cannot_switch(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+
+        $this->azureClient($platform)->chat($this->helloRequest(), ['model' => 'gpt-4o']);
+
+        self::assertSame('gpt-4o', $platform->model);
     }
 
     /**

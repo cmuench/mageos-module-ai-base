@@ -122,6 +122,8 @@
                     <item name="factory" xsi:type="string">Symfony\AI\Platform\Bridge\Azure\OpenAi\Factory</item>
                     <item name="package" xsi:type="string">symfony/ai-azure-platform</item>
                     <item name="dialect" xsi:type="string">openai_responses</item>
+                    <!-- The platform is built for one deployment and always sends it as the model. -->
+                    <item name="model_override" xsi:type="boolean">false</item>
                     <item name="catalog" xsi:type="string">Symfony\AI\Platform\Bridge\Azure\OpenAi\ModelCatalog</item>
                 </item>
                 <item name="deepseek" xsi:type="array">
@@ -388,39 +390,43 @@
                     <item name="lists" xsi:type="array">
                         <item name="stop" xsi:type="string">stop</item>
                     </item>
-                    <!-- Gemini's tool choice is `toolConfig.functionCallingConfig.mode`, with
+                    <!-- Gemini's tool choice is `tool_config.functionCallingConfig.mode`, with
                          `allowedFunctionNames` narrowing which tool "ANY" is allowed to be. Its
                          thinking control has no effort levels of its own, only a token budget
                          (`thinkingConfig.thinkingBudget`); the tiers below are this module's own
                          choice, not a value Google's API defines. The budget is per model: 2.5
                          Flash accepts 0 to switch thinking off, 2.5 Pro enforces a minimum and
                          rejects it, and newer models take a named thinking level rather than a
-                         budget (see docs/PROVIDERS.md, "Model-dependent values"). -->
+                         budget (see docs/PROVIDERS.md, "Model-dependent values").
+                         `tool_config` is snake_case on purpose: symfony/ai's Gemini bridge nests
+                         every option under generationConfig except `tool_config`, which it lifts
+                         to the top level of the request. Spelled `toolConfig` it stays nested,
+                         and Gemini rejects the request. -->
                     <item name="values" xsi:type="array">
                         <item name="tool_choice" xsi:type="array">
                             <item name="auto" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">AUTO</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="none" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">NONE</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="required" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">ANY</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="tool" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">ANY</item>
                                         <item name="allowedFunctionNames" xsi:type="array">

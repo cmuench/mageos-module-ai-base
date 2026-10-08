@@ -33,6 +33,8 @@ interface AiClientInterface
      *
      * Leave it out to use the configured model. A consumer that does not know which provider an
      * administrator picked should leave it out, since a model name is only valid at one provider.
+     * Azure routes every call to its configured deployment, so there an override to another model
+     * throws {@see \MageOS\AiBase\Exceptions\AiRequestNotSentException}.
      */
     public const OPTION_MODEL = 'model';
 

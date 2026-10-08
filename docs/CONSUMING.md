@@ -395,7 +395,7 @@ everything without any change:
 | No service configured (at all, or for the requested code) | `create()` | `LocalizedException` |
 | No client bridge registered for the service code | `create()` | `LocalizedException` |
 | symfony/ai-platform not installed | `create()` | `LocalizedException` |
-| A call rejected before it ever reached the provider: an unsupported option, an invalid model override or one the service's bridge has no route to, a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
+| A call rejected before it ever reached the provider: an unsupported option, an invalid model override, one the service's bridge has no route to, or any override on Azure (which always runs its configured deployment), a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
 | The provider rejected the configured credentials | `chat()` / `complete()` / `streamChat()` | `AiAuthenticationException` |
 | The provider throttled the call | `chat()` / `complete()` / `streamChat()` | `AiRateLimitedException` (`getRetryAfter(): ?int`) |
 | A server error, an overloaded model, a network failure (connection refused, DNS failure, connection reset, timeout), or a stream that ended before reporting completion | `chat()` / `complete()` / `streamChat()` | `AiTransientException` |
