@@ -24,6 +24,7 @@
             <directory>Test/Unit/Model/Chat</directory>
             <file>Test/Unit/Model/Client/SymfonyAiClientChatTest.php</file>
             <file>Test/Unit/Model/Client/SymfonyAiClientStreamFailureTest.php</file>
+            <file>Test/Unit/Model/Client/SymfonyAiClientTruncatedStreamTest.php</file>
             <file>Test/Unit/Model/Client/UsageNormalizerTest.php</file>
         </testsuite>
         <!--

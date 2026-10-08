@@ -183,7 +183,13 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         } catch (\Symfony\AI\Platform\Exception\MaxOutputTokensException) {
             yield from $this->yieldUsageMissedByTheDeltas($result, $usage);
 
-            return $this->truncatedResponse($text, $toolCalls, $usage, $result);
+            return $this->truncatedResponse(
+                $text,
+                $toolCalls,
+                $usage,
+                $result,
+                $this->extractTruncatedStreamReasoning($result),
+            );
         } catch (\Throwable $e) {
             yield from $this->yieldUsageMissedByTheDeltas($result, $usage);
 
@@ -933,6 +939,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      * @param list<\MageOS\AiBase\Api\Data\ToolCallInterface> $toolCalls
      * @param TokenUsageInterface|null $usage
      * @param \Symfony\AI\Platform\Result\DeferredResult $result
+     * @param list<Reasoning> $reasoning Reasoning blocks completed before the cut-off
      * @return ChatResponse
      */
     private function truncatedResponse(
@@ -940,6 +947,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         array $toolCalls,
         ?TokenUsageInterface $usage,
         object $result,
+        array $reasoning = [],
     ): ChatResponse {
         return new ChatResponse(
             $text,
@@ -947,6 +955,28 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
             $usage,
             FinishReason::Length,
             $this->extractRawFinishReason($result),
+            $reasoning,
         );
+    }
+
+    /**
+     * The reasoning a stream completed before the provider cut it off at the output token limit.
+     *
+     * The bridge throws `MaxOutputTokensException` at the very end of the stream, after every
+     * thinking event has been converted, and StreamResult's reassembled turn has kept those blocks,
+     * signatures included. Leaving them out of the returned turn would make a tool loop replay it
+     * without the signed reasoning Anthropic requires back (issue #63). Reading the turn is not
+     * worth failing a truncated answer over, so anything going wrong here means no reasoning.
+     *
+     * @param \Symfony\AI\Platform\Result\DeferredResult $result
+     * @return list<Reasoning>
+     */
+    private function extractTruncatedStreamReasoning(object $result): array
+    {
+        try {
+            return $this->extractStreamedReasoning($result);
+        } catch (\Throwable) {
+            return [];
+        }
     }
 }

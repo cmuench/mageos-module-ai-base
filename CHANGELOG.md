@@ -77,6 +77,8 @@ Since v0.0.1:
   A stored `xai` row is dropped the next time AI Configuration is saved.
 
 ### Fixed
+- A stream cut off at the output token limit keeps the signed reasoning it completed, so a tool
+  loop can replay the truncated turn ([#63](https://github.com/mage-os-lab/module-ai-base/issues/63)).
 - Gemini calls that set `tool_choice` were rejected with a 400; tool schemas with no properties
   are sent as a JSON object.
 - A per-call model override on Azure, which always runs its configured deployment, now throws
@@ -90,6 +92,10 @@ Since v0.0.1:
 - The AI Configuration form works at website and store scope, refuses an empty save from a form
   whose script did not finish rendering, and shows the deployment-lock warning only when the
   value is actually locked.
+- Saving the AI Configuration no longer deletes rows whose provider module was removed or
+  disabled ([#65](https://github.com/mage-os-lab/module-ai-base/issues/65)). They are kept as
+  stored, credentials included, and shown as a read-only placeholder with a delete button; they
+  work again with the same row id once the provider is back.
 
 ### Security
 - The bundled client never follows an HTTP redirect, so a provider credential sent in its own
