@@ -535,4 +535,9 @@
             </argument>
         </arguments>
     </type>
+    <type name="MageOS\AiBase\Model\Usage\Source\Store">
+        <arguments>
+            <argument name="storeViewOptions" xsi:type="object">Magento\Store\Ui\Component\Listing\Column\Store\Options</argument>
+        </arguments>
+    </type>
 </config>

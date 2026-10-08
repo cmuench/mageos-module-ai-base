@@ -143,7 +143,7 @@
         </column>
         <column name="store_id" component="Magento_Ui/js/grid/columns/select" sortOrder="140">
             <settings>
-                <options class="Magento\Store\Ui\Component\Listing\Column\Store\Options"/>
+                <options class="MageOS\AiBase\Model\Usage\Source\Store"/>
                 <filter>select</filter>
                 <dataType>select</dataType>
                 <label translate="true">Store</label>
