@@ -16,6 +16,8 @@ Api/
   ChatRequestBuilderInterface       assembles a request without naming a Model class
   PlatformAwareInterface            opt-in escape hatch to the raw symfony/ai Platform
   ModelListProviderInterface        opt-in live model listing (provider SPI)
+  PlatformArgumentsProviderInterface  opt-in bridge factory arguments when not the API key alone (provider SPI)
+  JsonFetcherInterface              GET + JSON decode for model listings, host-only error messages
   UsageStatsInterface               the one read contract behind the dashboard and the CLI report
   UsageRecordRepositoryInterface    persistence for the raw mageos_ai_usage_log table
   UsageDailyRepositoryInterface     persistence for the mageos_ai_usage_daily roll-up table
@@ -38,8 +40,10 @@ Api/
     Granularity                     Day | Month, how getTimeSeries() buckets a period
 
 AiServices/                         bundled providers (OpenAi, Anthropic, Azure, ...)
-  FieldFactoryTrait                 shared field builders (api_key, model, base_url, ...)
-  ModelListTrait                    shared OpenAI-shape model list parsing / base-URL resolution
+  AbstractAiService                 base class every provider extends: field builders, defaults
+                                    for interface methods added in minor releases, API-key-first
+                                    platform arguments
+  ModelListTrait                    shared OpenAI-shape model list parsing (internal)
 
 Model/
   AiServiceSelector                 parses stored JSON -> AiServiceInterface[] (decrypts, memoized)
@@ -60,13 +64,16 @@ Model/
     RecordingAiClient               decorator that writes one usage row per completed call
     RecordingPlatformAwareAiClient  the same decorator, for a delegate that is also PlatformAwareInterface
   ModelList/
-    HttpFetcher                     shared HTTP/JSON plumbing for model fetching
+    HttpFetcher                     Api\JsonFetcherInterface: shared HTTP/JSON plumbing for model fetching
     Storage                         persists fetched lists per service code
     Resolver                        stored list ?? curated getSupportedModels()
   Usage/
     UsageConfig                     typed reader for the mageos_ai/usage/* config group
     UsageRecord                     value object behind UsageRecordInterface
     UsageRecordRepository, UsageDailyRepository   implementations of the two Api repositories
+    UsageRecordReportInterface, UsageDailyReportInterface   internal range aggregation (raw row
+                                      arrays) for UsageStats and UsageMaintenance; not public API,
+                                      may change in any release
     UsageStats                      implementation of UsageStatsInterface; merges raw + daily
     UsageMaintenance                the roll-up/prune sequence the cron job runs
     UsageMaintenanceResult          what one UsageMaintenance::run() did, for the cron's log line
@@ -249,7 +256,7 @@ behind a chat call).
    arithmetic — never SQL's `DATE()` or `CONVERT_TZ()`, so a MySQL instance with no timezone
    tables loaded still gets the right boundary and a daylight-saving transition still produces
    exactly one 23- or 25-hour bucket) and converted to a UTC `[start, end)` pair.
-   `UsageRecordRepositoryInterface::aggregateRange()` produces one row per
+   `UsageRecordReportInterface::aggregateRange()` produces one row per
    (`service_id`, `service_code`, `model`, `consumer`, `store_id`) grouping key for that day, which
    `UsageDailyRepositoryInterface::saveAggregates()` writes with an insert-or-update that
    *replaces* an existing row's counts rather than summing onto them — the whole day is always

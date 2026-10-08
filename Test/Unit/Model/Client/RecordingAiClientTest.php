@@ -30,6 +30,8 @@ use MageOS\AiBase\Model\Client\RecordingAiClient;
 use MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClient;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
+use Symfony\AI\Platform\PlatformInterface;
+use Symfony\AI\Platform\Test\InMemoryPlatform;
 
 /**
  * @covers \MageOS\AiBase\Model\Client\RecordingAiClient
@@ -411,7 +413,7 @@ final class RecordingAiClientTest extends TestCase
 
     public function test_it_returns_the_wrapped_platform_untouched_from_get_platform(): void
     {
-        $platform = new \stdClass();
+        $platform = new InMemoryPlatform('Hi');
         $delegate = new FakePlatformAwareAiClient($platform);
 
         $subject = new RecordingPlatformAwareAiClient(
@@ -426,7 +428,7 @@ final class RecordingAiClientTest extends TestCase
 
     public function test_it_forwards_option_normalisation_to_the_wrapped_client(): void
     {
-        $delegate = new FakePlatformAwareAiClient(new \stdClass());
+        $delegate = new FakePlatformAwareAiClient(new InMemoryPlatform('Hi'));
 
         $subject = new RecordingPlatformAwareAiClient(
             $delegate,
@@ -610,12 +612,12 @@ class FakeAiClient implements AiClientInterface
  */
 class FakePlatformAwareAiClient extends FakeAiClient implements PlatformAwareInterface
 {
-    public function __construct(private readonly object $platform)
+    public function __construct(private readonly PlatformInterface $platform)
     {
         parent::__construct();
     }
 
-    public function getPlatform(): object
+    public function getPlatform(): PlatformInterface
     {
         return $this->platform;
     }
@@ -632,7 +634,7 @@ class FakePlatformAwareAiClient extends FakeAiClient implements PlatformAwareInt
 /**
  * In-memory stand-in for {@see UsageRecordRepositoryInterface}, kept next to the test that uses it.
  * Only save() is exercised by {@see RecordingAiClient}; every other method belongs to the admin
- * grid and the stats layer built by later tasks and is never called here.
+ * grid and the daily roll-up built by later tasks and is never called here.
  */
 class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
 {
@@ -680,58 +682,9 @@ class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
         throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
     }
 
-    public function aggregateRange(\DateTimeInterface $from, \DateTimeInterface $to, string $usageDate): array
-    {
-        throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
-    }
-
-    public function sumRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        ?string $consumer = null,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
-    }
-
-    public function groupRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $groupBy,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
-    }
-
     public function getDistinctConsumers(): array
     {
         throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
-    }
-
-    public function seriesRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \BadMethodCallException('Not used by RecordingAiClientTest.');
-    }
-    /**
-     * Not exercised by this test's subject; present so the fake satisfies the interface.
-     *
-     * @return array<int,array<string,int|string|null>>
-     */
-    public function seriesRangeGrouped(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        string $groupBy,
-        ?int $storeId = null
-    ): array {
-        return [];
     }
 }
 

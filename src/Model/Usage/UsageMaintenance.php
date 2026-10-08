@@ -36,7 +36,9 @@ class UsageMaintenance
      * @param UsageConfig $usageConfig Tells this class whether tracking is enabled at all and how
      *        many days of raw/daily history to keep.
      * @param UsageRecordRepositoryInterface $usageRecordRepository The raw log this class reads
-     *        aggregates from and deletes rolled-up rows out of.
+     *        the oldest timestamp from and deletes rolled-up rows out of.
+     * @param UsageRecordReportInterface $usageRecordReport The raw log's range aggregation this
+     *        class reads each day's aggregates from.
      * @param UsageDailyRepositoryInterface $usageDailyRepository The daily roll-up this class
      *        writes aggregates into and prunes once they are older than the daily retention.
      * @param TimezoneInterface $timezone Source of the store's configured timezone, so every day
@@ -48,6 +50,7 @@ class UsageMaintenance
     public function __construct(
         private readonly UsageConfig $usageConfig,
         private readonly UsageRecordRepositoryInterface $usageRecordRepository,
+        private readonly UsageRecordReportInterface $usageRecordReport,
         private readonly UsageDailyRepositoryInterface $usageDailyRepository,
         private readonly TimezoneInterface $timezone,
         private readonly UsageTransactionInterface $transaction,
@@ -104,7 +107,7 @@ class UsageMaintenance
 
         foreach ($this->localDaysToRollUp($oldestRecordedAt, $localTimezone) as $localDay) {
             [$windowStart, $windowEnd] = $this->utcWindowForLocalDay($localDay, $localTimezone);
-            $aggregateRows = $this->usageRecordRepository->aggregateRange(
+            $aggregateRows = $this->usageRecordReport->aggregateRange(
                 $windowStart,
                 $windowEnd,
                 $localDay->format('Y-m-d')
@@ -180,7 +183,7 @@ class UsageMaintenance
 
     /**
      * Converts one local calendar day into the half-open `[from, to)` UTC instant window
-     * {@see UsageRecordRepositoryInterface::aggregateRange()} and
+     * {@see UsageRecordReportInterface::aggregateRange()} and
      * {@see UsageRecordRepositoryInterface::deleteOlderThan()} compare `created_at` against.
      *
      * @param \DateTimeImmutable $localDay Any instant on the local day; only its `Y-m-d` portion

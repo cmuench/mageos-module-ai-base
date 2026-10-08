@@ -6,7 +6,12 @@ namespace MageOS\AiBase\Test\Unit\Model\Client;
 
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Exception\LocalizedException;
+use MageOS\AiBase\AiServices\Azure;
+use MageOS\AiBase\AiServices\LmStudio;
+use MageOS\AiBase\AiServices\Ollama;
+use MageOS\AiBase\AiServices\OpenAiCompatible;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
+use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
 use MageOS\AiBase\Api\PlatformAwareInterface;
 use MageOS\AiBase\Model\AiService;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
@@ -20,10 +25,13 @@ use MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClientFactory;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\SymfonyAiClientFactory;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
+use MageOS\AiBase\Model\ModelList\HttpFetcher;
+use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Symfony\AI\Platform\Test\InMemoryPlatform;
 
 final class ClientFactoryTest extends TestCase
 {
@@ -65,7 +73,27 @@ final class ClientFactoryTest extends TestCase
             new UsageConfig(new FakeScopeConfig($this->usageTrackingEnabled)),
             $this->recordingClientFactory,
             $this->recordingPlatformAwareClientFactory,
+            $this->serviceRegistry(),
         );
+    }
+
+    /**
+     * The bundled providers whose bridge factories take something other than the API key first,
+     * so the tests below exercise the arguments the providers themselves hand over.
+     *
+     * @return ServiceRegistry
+     */
+    private function serviceRegistry(): ServiceRegistry
+    {
+        $fieldFactory = $this->createMock(FieldDescriptorInterfaceFactory::class);
+        $modelListFetcher = $this->createMock(HttpFetcher::class);
+
+        return new ServiceRegistry([
+            new Ollama($fieldFactory, $modelListFetcher),
+            new LmStudio($fieldFactory, $modelListFetcher),
+            new OpenAiCompatible($fieldFactory),
+            new Azure($fieldFactory),
+        ]);
     }
 
     /**
@@ -661,7 +689,7 @@ final class ClientFactoryTest extends TestCase
         $this->usageTrackingEnabled = true;
         $this->serviceSelector->method('getByCode')->with('openai')
             ->willReturn([new AiService('row_openai', 'openai', ['api_key' => 'k', 'model' => 'gpt-4o'])]);
-        $this->clientFactory->method('create')->willReturn(new FakePlatformAwareAiClient(new \stdClass()));
+        $this->clientFactory->method('create')->willReturn(new FakePlatformAwareAiClient(new InMemoryPlatform('Hi')));
         $this->recordingPlatformAwareClientFactory->method('create')->willReturnCallback(
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],

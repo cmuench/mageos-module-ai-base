@@ -15,6 +15,7 @@ The module separates three concerns, each with its own contract:
 | `Api\AiServiceSelectorInterface` | Consumer API for reading configured instances (`getAll()`, `getByCode()`) |
 | `Api\AiClientInterface` / `Api\AiClientFactoryInterface` | Provider-agnostic client for actually making AI calls |
 | `Api\ModelListProviderInterface` | Optional: live-fetch the provider's model list (admin-triggered only) |
+| `Api\PlatformArgumentsProviderInterface` | Optional: the arguments the provider's Symfony AI bridge factory takes, when that isn't the API key alone |
 
 Configuration is stored as JSON in `core_config_data` at `mageos_ai/services/configuration`,
 shaped `{rowId: {serviceCode: {field: value}}}`. Multiple rows per service code are allowed
@@ -25,25 +26,17 @@ returns an array, and code paths that need "the" instance use the first row.
 
 ### 1. The service class
 
-Create `src/AiServices/<Name>.php` implementing `AiServiceConfigurationInterface`:
+Create a class in your own module that extends `AiServices\AbstractAiService`:
 
 ```php
 declare(strict_types=1);
 
-namespace MageOS\AiBase\AiServices;
+namespace Vendor\AcmeAi\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
-use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\AiServices\AbstractAiService;
 
-class Acme implements AiServiceConfigurationInterface
+class Acme extends AbstractAiService
 {
-    use FieldFactoryTrait;
-
-    public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-    ) {
-    }
-
     public function getCode(): string
     {
         return 'acme';
@@ -61,22 +54,22 @@ class Acme implements AiServiceConfigurationInterface
             'acme-mini'  => 'Acme Mini',
         ];
     }
-
-    public function getConfigurationFields(): array
-    {
-        return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
-        ];
-    }
 }
 ```
 
-`FieldFactoryTrait` provides the standard field builders:
+Extend the base class rather than implementing `Api\Data\AiServiceConfigurationInterface`
+directly: when that interface gains a method in a minor release, the base class ships a default for
+it at the same time, so your provider keeps working. Its constructor takes only the field factory;
+if your provider needs more, take it in your own constructor and call
+`parent::__construct($fieldFactory)`.
+
+By default a provider gets an API key field plus a model select built from
+`getSupportedModels()` (free text when that is empty). Override `getConfigurationFields()` for
+anything else, using the protected field builders:
 
 - `apiKeyField()` — password input named `api_key`, **marked encrypted**
-- `modelField()` — select named `model` built from a `value => label` map
-- `baseUrlField()` — text input named `base_url` with a default (local runtimes)
+- `modelField(array $models)` — select named `model` built from a `value => label` map
+- `baseUrlField(string $default, ?string $label = null)` — text input named `base_url` (local runtimes)
 - `freeTextModelField()` — text input named `model` (no curated list)
 
 You can also build fields directly with `FieldDescriptorInterfaceFactory`:
@@ -127,7 +120,7 @@ One array lists your service (`src/etc/di.xml`):
 <type name="MageOS\AiBase\Model\ServiceRegistry">
     <arguments>
         <argument name="services" xsi:type="array">
-            <item name="acme" xsi:type="object">MageOS\AiBase\AiServices\Acme</item>
+            <item name="acme" xsi:type="object">Vendor\AcmeAi\AiServices\Acme</item>
         </argument>
     </arguments>
 </type>
@@ -146,7 +139,9 @@ mismatch is misleading rather than broken.
 `AiClientFactoryInterface` builds clients from [symfony/ai-platform](https://github.com/symfony/ai)
 bridges. The OpenAI and Anthropic bridges ship with the module; every other bridge is a
 **soft dependency** (only needed when a client for that provider is actually created;
-`composer suggest`s it). Bridges are registered per service code:
+`composer suggest`s it). Bridges are registered per service code. The `bridges` and `dialects`
+argument keys shown below are a stable contract within a major version, even though the classes
+they configure are not `@api`:
 
 ```xml
 <type name="MageOS\AiBase\Model\Client\BridgeRegistry">
@@ -163,7 +158,7 @@ bridges. The OpenAI and Anthropic bridges ship with the module; every other brid
 ```
 
 `factory` is resolved lazily with `class_exists()`/`method_exists('createPlatform')` guards, so
-the mapping is safe to ship even when symfony/ai-platform is absent. `package` is what the admin
+the mapping is safe to ship even when your bridge package is not installed. `package` is what the admin
 form tells an administrator to install when the bridge is missing; a provider with no released
 bridge omits it and is labelled unsupported instead.
 
@@ -240,10 +235,22 @@ to look at the model configured on the row, not at this module:
 Where a model needs something else, send the provider's own option instead of the neutral one;
 it wins over the translation.
 
-The factory signatures are verified against **symfony/ai-platform v0.14.0**; the component is
-experimental with no BC promise — pin your version and re-verify on upgrade. Hosted providers
-pass the API key; local runtimes pass `base_url`; Azure passes endpoint/deployment/api_version/key
-(see `Model\Client\ClientFactory::createPlatform()` for the dispatch).
+Bridge factories disagree on what `createPlatform()` takes first. By default your provider hands
+over the API key alone, which is what hosted providers' factories take. If yours takes something
+else, override `getPlatformArguments()` (from `Api\PlatformArgumentsProviderInterface`) and return
+the leading positional arguments; the client factory adds the optional named ones (HTTP client,
+model catalogue) itself:
+
+```php
+public function getPlatformArguments(array $configuration): array
+{
+    return [$this->resolveBaseUrl($configuration, 'http://localhost:8080')];
+}
+```
+
+The bundled Ollama, LM Studio, OpenAI-Compatible and Azure providers are worked examples. The
+bridge signatures are verified against **symfony/ai-platform v0.14.0**; the component is
+experimental with no BC promise, so pin your version and re-verify on upgrade.
 
 A service without a bridge still works for configuration storage — `create('acme')` will
 throw a `LocalizedException` explaining no bridge is registered. The admin **Test Connection**
@@ -259,10 +266,10 @@ public function fetchModels(array $configuration): array
 ```
 
 It receives the saved (decrypted) configuration and returns a `value => label` map, throwing
-`LocalizedException` with an admin-readable message on failure. Inject the shared
-`Model\ModelList\HttpFetcher` (`getJson(url, headers)` — timeouts, non-2xx and JSON errors
-already handled) rather than rolling your own client, and see `AiServices\ModelListTrait`
-for ready-made OpenAI-shape response parsing. Implementing the interface is all it takes —
+`LocalizedException` with an admin-readable message on failure. Inject
+`Api\JsonFetcherInterface` (`getJson(url, headers)`: timeouts, non-2xx and JSON errors already
+handled, and error messages that name the host rather than the full URL) rather than rolling your
+own client. The bundled `OpenAi` and `Ollama` providers show the response parsing. Implementing the interface is all it takes —
 the admin form detects it (`supportsModelRefresh` in the schema JSON) and shows the button
 automatically.
 
@@ -321,5 +328,6 @@ public function __construct(
 See `Test/Unit/AiServices/ServicesTest.php` — a parametrized smoke test asserting every
 registered service exposes a non-empty code/name, valid field descriptors, and that encrypted
 flags are set where expected. Add your class to its data provider (or replicate the pattern in
-your own module). For `fetchModels()`, mock `HttpFetcher` and assert the response-shape parsing
-and failure paths (`Test/Unit/Model/ModelList/` has examples).
+your own module). For `fetchModels()`, give it a small fake `JsonFetcherInterface` that returns a
+canned response, and assert the parsing and failure paths (`Test/Unit/AiServices/ModelListFetchTest.php`
+has examples).

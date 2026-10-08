@@ -7,7 +7,7 @@ namespace MageOS\AiBase\Test\Unit\Model\Usage;
 require_once __DIR__ . '/../../Stubs/UsageLogCollectionFactoryStub.php';
 require_once __DIR__ . '/../../Stubs/SearchResultsInterfaceFactoryStub.php';
 
-use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageLog\CollectionFactory;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageLogResourceInterface;
 use MageOS\AiBase\Model\Usage\UsageRecord;
@@ -240,12 +240,12 @@ final class UsageRecordRepositoryTest extends TestCase
         $byConsumer = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER
+            UsageRecordReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageRecordRepositoryInterface::GROUP_BY_SERVICE
+            UsageRecordReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));

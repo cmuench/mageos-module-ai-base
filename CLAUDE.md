@@ -76,7 +76,7 @@ Admin UI lives at **Stores → Configuration → Mage-OS → AI Configuration**;
 
 There are two intentionally separate interfaces — do not conflate them:
 
-- **`Api\Data\AiServiceConfigurationInterface`** (`getCode`, `getName`, `getConfigurationTemplate`) — describes an *available* backend: its machine code, display name, and the HTML snippet used in the admin form. Implementations live in `src/AiServices/*.php`. These are registered once in `etc/di.xml`, on the `services` array argument of `Model\ServiceRegistry`; the admin form block, the `ConfiguredService` option source, `Model\Config\SensitiveDataProcessor` and the `RefreshModels` controller all read that registry.
+- **`Api\Data\AiServiceConfigurationInterface`** (`getCode`, `getName`, `getConfigurationFields`, `getSupportedModels`) — describes an *available* backend: its machine code, display name, admin form fields and curated model list. Implementations extend `AiServices\AbstractAiService` and live in `src/AiServices/*.php`. These are registered once in `etc/di.xml`, on the `services` array argument of `Model\ServiceRegistry`; the admin form block, the `ConfiguredService` option source, `Model\Config\SensitiveDataProcessor` and the `RefreshModels` controller all read that registry.
 - **`Api\Data\AiServiceInterface`** (`getId`, `getCode`, `getConfiguration`) — represents a *configured instance* (stored row id + code + stored credentials/model/etc. array). Produced at runtime by `Model\AiServiceSelector` through `AiServiceInterfaceFactory`. `getId()` is the JSON object key of the row, which the admin form preserves across saves; it is the identity another module stores when an administrator picks a service.
 
 `AiServiceSelectorInterface` is the public consumer API. It resolves at store scope in whatever scope is ambient, and takes no scope argument, so adminhtml/cron/CLI always read the default scope:
@@ -107,11 +107,12 @@ Stored data flow:
 
 ## Adding a new AI backend
 
-1. Create `src/AiServices/<Name>.php` implementing `AiServiceConfigurationInterface`. The configuration template's input `name` attributes must follow `<%- _fieldName %>[<service_code>][<field>]` — that nesting is what the selector expects when reading back.
-   **Every field that holds a credential must set `'encrypted' => true` on its descriptor** (`FieldFactoryTrait::apiKeyField()` does). That flag is what encrypts the value at rest and masks it in the form. `Model\Config\SensitiveDataProcessor` also has a name-based fallback for rows whose provider is no longer registered, but it only recognises common credential names (`api_key`, `client_secret`, `access_token`, `password`, ...) and exists as defense in depth, not as the mechanism.
+1. Create `src/AiServices/<Name>.php` extending `AiServices\AbstractAiService` (never implement `AiServiceConfigurationInterface` directly; the base class is what keeps providers working when that interface gains a method). Override `getSupportedModels()` and, when the defaults (API key + model) don't fit, `getConfigurationFields()` using the protected field builders.
+   **Every field that holds a credential must set `'encrypted' => true` on its descriptor** (`AbstractAiService::apiKeyField()` does). That flag is what encrypts the value at rest and masks it in the form. `Model\Config\SensitiveDataProcessor` also has a name-based fallback for rows whose provider is no longer registered, but it only recognises common credential names (`api_key`, `client_secret`, `access_token`, `password`, ...) and exists as defense in depth, not as the mechanism.
 2. Register it in `etc/di.xml` under the `services` argument of `Model\ServiceRegistry`. The item name should match the class's `getCode()`, which is what the registry keys by.
-3. To make it usable through the bundled client, add a `Model\Client\BridgeRegistry` entry with its `factory`, `package` and request-option `dialect` (see `Model\Client\OptionNormalizer` for the dialects).
-4. No other wiring is required — the admin UI and selector pick it up automatically.
+3. To make it usable through the bundled client, add a `Model\Client\BridgeRegistry` entry with its `factory`, `package` and request-option `dialect` (see `Model\Client\OptionNormalizer` for the dialects). If the bridge factory's `createPlatform()` doesn't take the API key first, override `getPlatformArguments()` (`Api\PlatformArgumentsProviderInterface`); `ClientFactory` has no per-provider code.
+4. For a live model list, implement `Api\ModelListProviderInterface` and inject `Api\JsonFetcherInterface`.
+5. No other wiring is required — the admin UI and selector pick it up automatically.
 
 ## Conventions observed in this codebase
 

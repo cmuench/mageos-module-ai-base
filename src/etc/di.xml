@@ -5,6 +5,7 @@
     <preference for="MageOS\AiBase\Api\Data\AiServiceInterface" type="MageOS\AiBase\Model\AiService"/>
     <preference for="MageOS\AiBase\Api\Data\FieldDescriptorInterface" type="MageOS\AiBase\Model\FieldDescriptor"/>
     <preference for="MageOS\AiBase\Api\AiClientFactoryInterface" type="MageOS\AiBase\Model\Client\ClientFactory"/>
+    <preference for="MageOS\AiBase\Api\JsonFetcherInterface" type="MageOS\AiBase\Model\ModelList\HttpFetcher"/>
 
     <!-- Chat value objects. Consumer modules are told to type-hint against Api only, which is only
          honest if there is a way to obtain one without naming a Model class: these preferences are
@@ -32,6 +33,7 @@
     <preference for="MageOS\AiBase\Model\ResourceModel\Usage\UsageDailyResourceInterface"
                 type="MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily"/>
     <preference for="MageOS\AiBase\Api\UsageDailyRepositoryInterface" type="MageOS\AiBase\Model\Usage\UsageDailyRepository"/>
+    <preference for="MageOS\AiBase\Model\Usage\UsageDailyReportInterface" type="MageOS\AiBase\Model\Usage\UsageDailyRepository"/>
 
     <!-- The raw usage log's repository (task 005) depends on the narrow
          UsageLogResourceInterface rather than the concrete resource model, so its unit tests can
@@ -40,6 +42,7 @@
     <preference for="MageOS\AiBase\Model\ResourceModel\Usage\UsageLogResourceInterface"
                 type="MageOS\AiBase\Model\ResourceModel\Usage\UsageLog"/>
     <preference for="MageOS\AiBase\Api\UsageRecordRepositoryInterface" type="MageOS\AiBase\Model\Usage\UsageRecordRepository"/>
+    <preference for="MageOS\AiBase\Model\Usage\UsageRecordReportInterface" type="MageOS\AiBase\Model\Usage\UsageRecordRepository"/>
 
     <!-- Same reasoning one level up: UsageMaintenance commits each day's aggregate and the delete
          behind it together, and depends on the narrow UsageTransactionInterface so its unit tests

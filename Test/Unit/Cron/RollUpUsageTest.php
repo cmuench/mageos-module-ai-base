@@ -9,6 +9,7 @@ use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use MageOS\AiBase\Cron\RollUpUsage;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use MageOS\AiBase\Model\Usage\UsageMaintenance;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
@@ -44,6 +45,7 @@ final class RollUpUsageTest extends TestCase
         $usageConfig = new UsageConfig($this->scopeConfig);
         $usageMaintenance = new UsageMaintenance(
             $usageConfig,
+            $this->usageRecordRepository,
             $this->usageRecordRepository,
             $this->usageDailyRepository,
             new FakeTimezone('UTC'),
@@ -145,12 +147,13 @@ final class RollUpUsageTest extends TestCase
 }
 
 /**
- * In-memory stand-in for {@see UsageRecordRepositoryInterface}, trimmed to what
- * {@see UsageMaintenance} calls, plus {@see throwOnAggregate()} so
+ * In-memory stand-in for {@see UsageRecordRepositoryInterface} and
+ * {@see UsageRecordReportInterface}, trimmed to what {@see UsageMaintenance} calls and passed to it
+ * once for each contract, plus {@see throwOnAggregate()} so
  * {@see RollUpUsageTest::test_it_logs_and_rethrows_a_maintenance_failure()} can force the failure
  * path without reaching for a mock.
  */
-final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
+final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface, UsageRecordReportInterface
 {
     /**
      * @var array<int,array<string,int|string|null>>
@@ -388,56 +391,12 @@ final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
         return count($keysToDelete);
     }
 
-    public function sumRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        ?string $consumer = null,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
-    public function groupRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $groupBy,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
-    public function seriesRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
     /**
      * @return array<int,array<string,int|string|null>>
      */
     public function getStoredRows(): array
     {
         return array_values($this->rowsByKey);
-    }
-    /**
-     * Not exercised by this test's subject; present so the fake satisfies the interface.
-     *
-     * @return array<int,array<string,int|string|null>>
-     */
-    public function seriesRangeGrouped(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        string $groupBy,
-        ?int $storeId = null
-    ): array {
-        return [];
     }
 }
 

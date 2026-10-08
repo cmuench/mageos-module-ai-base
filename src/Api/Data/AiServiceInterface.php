@@ -4,6 +4,12 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Api\Data;
 
+/**
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
+ */
 interface AiServiceInterface
 {
     /**

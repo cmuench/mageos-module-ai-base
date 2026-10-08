@@ -7,7 +7,7 @@ namespace MageOS\AiBase\Test\Integration\Model\Usage;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\TestFramework\Helper\Bootstrap;
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily;
 use PHPUnit\Framework\TestCase;
 
@@ -212,12 +212,12 @@ final class UsageDailyTest extends TestCase
         $byConsumer = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_SERVICE
+            UsageDailyReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));
@@ -235,12 +235,12 @@ final class UsageDailyTest extends TestCase
         $daily = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
         $monthly = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            UsageDailyReportInterface::GRANULARITY_MONTH
         );
 
         self::assertSame(['2026-01-05', '2026-01-06', '2026-02-01'], array_column($daily, 'period'));
@@ -271,7 +271,7 @@ final class UsageDailyTest extends TestCase
         $storeOne = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -286,7 +286,7 @@ final class UsageDailyTest extends TestCase
         $storeOne = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             1
         );
 
@@ -304,8 +304,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-17 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
 
         $byBucketAndGroup = [];
@@ -329,8 +329,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-03-01 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GRANULARITY_MONTH,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
 
         self::assertSame(['2026-01', '2026-02'], array_column($series, 'period'));
@@ -347,8 +347,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -364,7 +364,7 @@ final class UsageDailyTest extends TestCase
         $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             'model'
         );
     }

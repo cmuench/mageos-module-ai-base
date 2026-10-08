@@ -58,23 +58,20 @@ class StreamChunk implements StreamChunkInterface
     }
 
     /**
-     * @inheritdoc
+     * The chunk as JSON: its type, plus the one payload that type carries.
+     *
+     * The tool call and usage serialize themselves, so their shape is defined once and is the same
+     * whether it arrives in a stream or on a buffered response.
+     *
+     * @return array<string, mixed>
      */
-    public function getData(): array
+    public function jsonSerialize(): array
     {
-        return match ($this->type) {
+        return ['type' => $this->type->value] + match ($this->type) {
             StreamChunkType::Text, StreamChunkType::Thinking => ['text' => $this->text],
             StreamChunkType::ThinkingStart => [],
-            StreamChunkType::ToolCall, StreamChunkType::ToolCallStart => [
-                'id' => $this->toolCall?->getId() ?? '',
-                'name' => $this->toolCall?->getName() ?? '',
-                'input' => $this->toolCall?->getArguments() ?? [],
-            ],
-            StreamChunkType::Usage => [
-                'prompt_tokens' => $this->usage?->getPromptTokens(),
-                'completion_tokens' => $this->usage?->getCompletionTokens(),
-                'total_tokens' => $this->usage?->getTotalTokens(),
-            ],
+            StreamChunkType::ToolCall, StreamChunkType::ToolCallStart => ['tool_call' => $this->toolCall],
+            StreamChunkType::Usage => ['usage' => $this->usage],
         };
     }
 }

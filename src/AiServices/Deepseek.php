@@ -4,21 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
-use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
-
-class Deepseek implements AiServiceConfigurationInterface
+class Deepseek extends AbstractAiService
 {
-    use FieldFactoryTrait;
-
-    /**
-     * @param FieldDescriptorInterfaceFactory $fieldFactory
-     */
-    public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-    ) {
-    }
-
     /**
      * @inheritdoc
      */
@@ -52,8 +39,8 @@ class Deepseek implements AiServiceConfigurationInterface
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
+            $this->apiKeyField(),
+            $this->modelField($this->getSupportedModels()),
         ];
     }
 }

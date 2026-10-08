@@ -31,6 +31,11 @@ use MageOS\AiBase\Api\Data\ToolDefinitionInterface;
  *
  * Every method returns a new builder rather than mutating this one, so a builder holding the
  * common preamble can be kept and branched from safely.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface ChatRequestBuilderInterface
 {

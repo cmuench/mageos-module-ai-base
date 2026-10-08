@@ -13,6 +13,12 @@ use MageOS\AiBase\Api\Data\ChatResponseInterface;
  *
  * Consumer modules should depend on this interface instead of talking to
  * provider APIs or raw configuration directly.
+ *
+ * Stable to call. Methods may be added in a minor release, so a store that replaces the client
+ * stack through a `<preference>` has to add them too; to change what it does without taking that
+ * on, write a plugin on it instead.
+ *
+ * @api
  */
 interface AiClientInterface
 {

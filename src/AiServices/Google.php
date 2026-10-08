@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace MageOS\AiBase\AiServices;
 
 use Magento\Framework\Exception\LocalizedException;
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\ModelList\HttpFetcher;
 
-class Google implements AiServiceConfigurationInterface, ModelListProviderInterface
+class Google extends AbstractAiService implements ModelListProviderInterface
 {
-    use FieldFactoryTrait;
     use ModelListTrait;
 
     /**
@@ -46,12 +44,13 @@ class Google implements AiServiceConfigurationInterface, ModelListProviderInterf
 
     /**
      * @param FieldDescriptorInterfaceFactory $fieldFactory
-     * @param HttpFetcher $modelListFetcher
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-        private readonly HttpFetcher $modelListFetcher,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
@@ -93,8 +92,8 @@ class Google implements AiServiceConfigurationInterface, ModelListProviderInterf
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
+            $this->apiKeyField(),
+            $this->modelField($this->getSupportedModels()),
         ];
     }
 

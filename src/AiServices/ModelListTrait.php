@@ -63,19 +63,4 @@ trait ModelListTrait
 
         return is_string($apiKey) ? $apiKey : '';
     }
-
-    /**
-     * Resolve the base URL from configuration, falling back to a default, without a trailing slash.
-     *
-     * @param array<string,mixed> $configuration Saved service configuration
-     * @param string $default Default base URL for this service
-     * @return string
-     */
-    private function resolveBaseUrl(array $configuration, string $default): string
-    {
-        $baseUrl = $configuration['base_url'] ?? null;
-        $baseUrl = is_string($baseUrl) && trim($baseUrl) !== '' ? trim($baseUrl) : $default;
-
-        return rtrim($baseUrl, '/');
-    }
 }

@@ -4,6 +4,13 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Api\Data;
 
+/**
+ * Providers implement this by extending {@see \MageOS\AiBase\AiServices\AbstractAiService}, which
+ * ships a default for every method added in a minor release. A provider implementing this
+ * interface directly has to add those methods itself.
+ *
+ * @api
+ */
 interface AiServiceConfigurationInterface
 {
     /**

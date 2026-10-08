@@ -9,6 +9,7 @@ use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Api\PlatformAwareInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\AI\Platform\PlatformInterface;
 
 /**
  * {@see RecordingAiClient} for a wrapped client that also implements {@see PlatformAwareInterface}.
@@ -50,7 +51,7 @@ class RecordingPlatformAwareAiClient extends RecordingAiClient implements Platfo
     /**
      * @inheritdoc
      */
-    public function getPlatform(): object
+    public function getPlatform(): PlatformInterface
     {
         return $this->platformAwareDelegate->getPlatform();
     }

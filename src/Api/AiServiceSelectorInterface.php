@@ -15,6 +15,11 @@ use MageOS\AiBase\Api\Data\AiServiceInterface;
  * there is no current store, so the default scope answers — a per-website or per-store services
  * list is not reachable from those contexts. Code that needs a specific scope has to establish it
  * first (store emulation), which is the same rule the rest of Magento's configuration follows.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface AiServiceSelectorInterface
 {

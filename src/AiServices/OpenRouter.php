@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\ModelList\HttpFetcher;
 
-class OpenRouter implements AiServiceConfigurationInterface, ModelListProviderInterface
+class OpenRouter extends AbstractAiService implements ModelListProviderInterface
 {
-    use FieldFactoryTrait;
     use ModelListTrait;
 
     /**
@@ -21,12 +19,13 @@ class OpenRouter implements AiServiceConfigurationInterface, ModelListProviderIn
 
     /**
      * @param FieldDescriptorInterfaceFactory $fieldFactory
-     * @param HttpFetcher $modelListFetcher
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-        private readonly HttpFetcher $modelListFetcher,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
@@ -59,8 +58,8 @@ class OpenRouter implements AiServiceConfigurationInterface, ModelListProviderIn
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->freeTextModelField($this->fieldFactory),
+            $this->apiKeyField(),
+            $this->freeTextModelField(),
         ];
     }
 

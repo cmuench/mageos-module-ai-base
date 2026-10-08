@@ -323,7 +323,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
     /**
      * @inheritdoc
      */
-    public function getPlatform(): object
+    public function getPlatform(): \Symfony\AI\Platform\PlatformInterface
     {
         return $this->platform;
     }

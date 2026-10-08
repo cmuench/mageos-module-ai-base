@@ -43,4 +43,21 @@ class ToolCall implements ToolCallInterface
     {
         return $this->arguments;
     }
+
+    /**
+     * The call as JSON, with its arguments always encoded as an object.
+     *
+     * A call without arguments holds an empty PHP array, which json_encode would write as `[]`;
+     * a consumer reading `arguments.someKey` expects an object either way.
+     *
+     * @return array{id: string, name: string, arguments: object}
+     */
+    public function jsonSerialize(): array
+    {
+        return [
+            'id' => $this->id,
+            'name' => $this->name,
+            'arguments' => (object) $this->arguments,
+        ];
+    }
 }

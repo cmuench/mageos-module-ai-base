@@ -17,14 +17,31 @@ description generation, translations, chat, ...). To *add* a provider, see
 <sequence><module name="MageOS_AiBase"/></sequence>
 ```
 
-Type-hint only against `MageOS\AiBase\Api\*` interfaces. Never depend on `Model\*` classes
-or on symfony/ai types, with one exception: the exception classes in `Model\Client\*` that
-`chat()`, `complete()` and `streamChat()` throw (listed under
-[Failure modes to handle](#failure-modes-to-handle)) are public API, since catching one means
-naming it — implementations can be swapped by the host store via `<preference>`.
+Type-hint only against `MageOS\AiBase\Api\*` interfaces and the `MageOS\AiBase\Exceptions\*`
+classes that `chat()`, `complete()` and `streamChat()` throw (listed under
+[Failure modes to handle](#failure-modes-to-handle)). Never depend on `Model\*` classes or on
+symfony/ai types; implementations can be swapped by the host store via `<preference>`.
 Everything below follows that rule: requests are assembled through
 `Api\ChatRequestBuilderInterface`, and every `Api\Data` interface has a `<preference>`, so the
 Magento-generated `*InterfaceFactory` for it resolves if you'd rather build one directly.
+
+## What's stable
+
+This module follows semantic versioning, and only types marked `@api`, plus
+`AiServices\AbstractAiService`, are covered by it (Magento's coding standard keeps `@api` off
+abstract classes). Anything
+without `@api` (every `Model\*` class, `AiServices\*` traits, `ResourceModel\*`) can change in any
+release.
+
+| Type | Promise within a major version |
+|---|---|
+| `Api\*` and `Api\Data\*` interfaces | Safe to call and to type-hint against. Methods may be added in a minor release, so don't implement them yourself; write a plugin to change behavior. A store that replaces the whole client stack with a `<preference>` on `AiClientFactoryInterface` takes on adding those methods. |
+| `Api\Data\AiServiceConfigurationInterface` | Safe to implement, by extending `AiServices\AbstractAiService`, which gets a default for every method added in a minor release. |
+| Capability interfaces (`Api\ModelListProviderInterface`, `Api\PlatformArgumentsProviderInterface`) | Safe to implement. They don't change; a new capability gets a new interface. |
+| The `bridges` argument of `Model\Client\BridgeRegistry` and the `dialects` argument of `Model\Client\OptionNormalizer` in di.xml | The keys documented in [PROVIDERS.md](PROVIDERS.md) don't change; new optional keys may be added. |
+| `Exceptions\*` | Safe to catch. New subclasses may be added in a minor release, always below an existing one, so an existing `catch` keeps catching them. |
+| Enums in `Api\Data` | Cases may be added in a minor release. Give a `match` over one a `default` arm. |
+| JSON of `StreamChunkInterface`, `ToolCallInterface`, `TokenUsageInterface` | Keys don't change or disappear. New keys may be added. |
 
 ## Making AI calls (recommended)
 
@@ -254,13 +271,28 @@ A `match` with no default arm throws `UnhandledMatchError` the moment a new
 `ToolCallStart` were added; add a default arm (`default => null`) if you would rather ignore
 chunk kinds you do not yet handle than update this `match` on every release.
 
-Bridging to a callback-style stream is three lines, since `getData()` is a flat payload:
+Every chunk is `JsonSerializable`, so sending the stream to a browser as server-sent events is
+one line per chunk:
 
 ```php
 foreach ($client->streamChat($request) as $chunk) {
-    $onChunk($chunk->getType()->value, $chunk->getData());
+    echo 'data: ' . json_encode($chunk) . "\n\n";
+    flush();
 }
 ```
+
+The JSON shape is stable across 1.x:
+
+| Chunk type | JSON |
+|---|---|
+| `text`, `thinking` | `{"type": "text", "text": "Hel"}` |
+| `thinking_start` | `{"type": "thinking_start"}` |
+| `tool_call`, `tool_call_start` | `{"type": "tool_call", "tool_call": {"id": "toolu_01", "name": "get_orders", "arguments": {"status": "pending"}}}` |
+| `usage` | `{"type": "usage", "usage": {"prompt_tokens": 120, "completion_tokens": 45, "total_tokens": 165, "cache_read_tokens": null, "cache_write_tokens": null, "reasoning_tokens": null}}` |
+
+`arguments` is always an object, `{}` on a `tool_call_start` chunk. A tool call and a usage
+object encode the same way on their own, so `json_encode($response->getToolCalls())` gives the
+same shape for a buffered response.
 
 Tool calls arrive **complete**, with arguments already accumulated and JSON-decoded by the
 provider bridge, on a `StreamChunkType::ToolCall` chunk. There are no SSE frames to parse and

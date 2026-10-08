@@ -12,6 +12,11 @@ namespace MageOS\AiBase\Api\Data;
  * `Y-m-d`/`Y-m` period label are all just the group's own label as far as a caller reading
  * {@see getGroupValue()} needs to know, and duplicating this interface three times over would only
  * buy three places for the totals shape to drift.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface UsageBreakdownInterface
 {

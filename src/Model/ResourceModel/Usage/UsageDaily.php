@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\ResourceModel\Usage;
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
 use Magento\Framework\Model\ResourceModel\Db\AbstractDb;
@@ -47,7 +47,7 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
 
     /**
      * Grouping-key column also usable as a
-     * {@see UsageDailyRepositoryInterface::GROUP_BY_CONSUMER} value.
+     * {@see UsageDailyReportInterface::GROUP_BY_CONSUMER} value.
      */
     private const COLUMN_CONSUMER = 'consumer';
 
@@ -90,8 +90,8 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * @var string[]
      */
     private const ALLOWED_GROUP_BY_COLUMNS = [
-        UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
-        UsageDailyRepositoryInterface::GROUP_BY_SERVICE,
+        UsageDailyReportInterface::GROUP_BY_CONSUMER,
+        UsageDailyReportInterface::GROUP_BY_SERVICE,
     ];
 
     /**
@@ -100,8 +100,8 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * @var string[]
      */
     private const ALLOWED_GRANULARITIES = [
-        UsageDailyRepositoryInterface::GRANULARITY_DAY,
-        UsageDailyRepositoryInterface::GRANULARITY_MONTH,
+        UsageDailyReportInterface::GRANULARITY_DAY,
+        UsageDailyReportInterface::GRANULARITY_MONTH,
     ];
 
     /**
@@ -260,7 +260,7 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * `calls` and `failed_calls` sum the daily table's own pre-aggregated counts rather than
      * counting rows: unlike the raw log, one row here already represents many calls. The token
      * columns coalesce a `NULL` sum (no matching row) to `0`, matching the "always an int, zero
-     * when nothing matched" promise on {@see UsageDailyRepositoryInterface::sumRange()}.
+     * when nothing matched" promise on {@see UsageDailyReportInterface::sumRange()}.
      * `cache_read_tokens`, `cache_write_tokens` and `reasoning_tokens` are left to sum to a genuine
      * `NULL` when nothing reported them, since MySQL's `SUM()` already ignores `NULL` inputs and
      * only returns `NULL` itself when every input was `NULL` — exactly the "stays null, never
@@ -294,7 +294,7 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      */
     private function periodExpression(string $granularity): string|\Zend_Db_Expr
     {
-        return $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH
+        return $granularity === UsageDailyReportInterface::GRANULARITY_MONTH
             ? new \Zend_Db_Expr(sprintf("DATE_FORMAT(%s, '%%Y-%%m')", self::COLUMN_USAGE_DATE))
             : self::COLUMN_USAGE_DATE;
     }

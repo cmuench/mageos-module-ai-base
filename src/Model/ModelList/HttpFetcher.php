@@ -7,6 +7,7 @@ namespace MageOS\AiBase\Model\ModelList;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\HTTP\ClientFactory;
 use Magento\Framework\Serialize\Serializer\Json;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 
 /**
  * Shared HTTP/JSON plumbing for model-list providers.
@@ -19,7 +20,7 @@ use Magento\Framework\Serialize\Serializer\Json;
  * query string or credentials in its authority. The client's exception stays attached as the
  * cause, so a log record of the LocalizedException still carries everything it said.
  */
-class HttpFetcher
+class HttpFetcher implements JsonFetcherInterface
 {
     /**
      * Request timeout in seconds; model listings are small, providers answer fast.
@@ -37,12 +38,7 @@ class HttpFetcher
     }
 
     /**
-     * Perform a GET request and decode the JSON response body.
-     *
-     * @param string $url
-     * @param array<string,string> $headers Header name => value
-     * @return array<mixed> Decoded JSON response
-     * @throws LocalizedException On transport failure, non-2xx status or invalid JSON
+     * @inheritdoc
      */
     public function getJson(string $url, array $headers = []): array
     {

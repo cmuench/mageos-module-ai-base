@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\ResourceModel\Usage;
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
-use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
 use Magento\Framework\Model\ResourceModel\Db\AbstractDb;
@@ -40,14 +40,14 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
     /**
      * Allowed values of {@see seriesRange()}'s `$granularity` argument.
      *
-     * Reuses {@see UsageDailyRepositoryInterface}'s constants rather than declaring parallel ones,
-     * per {@see \MageOS\AiBase\Api\UsageRecordRepositoryInterface::seriesRange()}'s own docblock.
+     * Reuses {@see UsageDailyReportInterface}'s constants rather than declaring parallel ones,
+     * per {@see \MageOS\AiBase\Model\Usage\UsageRecordReportInterface::seriesRange()}'s own docblock.
      *
      * @var string[]
      */
     private const ALLOWED_GRANULARITIES = [
-        UsageDailyRepositoryInterface::GRANULARITY_DAY,
-        UsageDailyRepositoryInterface::GRANULARITY_MONTH,
+        UsageDailyReportInterface::GRANULARITY_DAY,
+        UsageDailyReportInterface::GRANULARITY_MONTH,
     ];
 
     /**
@@ -87,7 +87,7 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
 
     /**
      * Grouping-key column also usable as a
-     * {@see UsageRecordRepositoryInterface::GROUP_BY_CONSUMER} value.
+     * {@see UsageRecordReportInterface::GROUP_BY_CONSUMER} value.
      */
     private const COLUMN_CONSUMER = 'consumer';
 
@@ -109,8 +109,8 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
      * @var string[]
      */
     private const ALLOWED_GROUP_BY_COLUMNS = [
-        UsageRecordRepositoryInterface::GROUP_BY_CONSUMER,
-        UsageRecordRepositoryInterface::GROUP_BY_SERVICE,
+        UsageRecordReportInterface::GROUP_BY_CONSUMER,
+        UsageRecordReportInterface::GROUP_BY_SERVICE,
     ];
 
     /**
@@ -305,7 +305,7 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
      * why `calls` is a plain `COUNT(*)` rather than coalescing a summed column. `failed_calls`
      * counts rows whose `failed` flag was set, the same way. The token columns coalesce a `NULL`
      * sum (no matching row) to `0`, matching the "always an int, zero when nothing matched" promise
-     * on {@see UsageRecordRepositoryInterface::sumRange()}. `cache_read_tokens`,
+     * on {@see UsageRecordReportInterface::sumRange()}. `cache_read_tokens`,
      * `cache_write_tokens` and `reasoning_tokens` are left to sum to a genuine `NULL` when nothing
      * reported them, since MySQL's `SUM()` already ignores `NULL` inputs and only returns `NULL`
      * itself when every input was `NULL`.
@@ -395,7 +395,7 @@ class UsageLog extends AbstractDb implements UsageLogResourceInterface
     {
         $localTimezone = $this->localTimezone();
         $utcTimezone = new \DateTimeZone(self::UTC_TIMEZONE);
-        $isMonthly = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH;
+        $isMonthly = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH;
         $labelFormat = $isMonthly ? 'Y-m' : 'Y-m-d';
         $stepModifier = $isMonthly ? '+1 month' : '+1 day';
 

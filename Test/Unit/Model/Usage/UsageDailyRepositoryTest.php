@@ -7,7 +7,7 @@ namespace MageOS\AiBase\Test\Unit\Model\Usage;
 require_once __DIR__ . '/../../Stubs/UsageDailyCollectionFactoryStub.php';
 require_once __DIR__ . '/../../Stubs/SearchResultsInterfaceFactoryStub.php';
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily\CollectionFactory;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDailyResourceInterface;
 use MageOS\AiBase\Model\Usage\UsageDailyRepository;
@@ -146,12 +146,12 @@ final class UsageDailyRepositoryTest extends TestCase
         $byConsumer = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_SERVICE
+            UsageDailyReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));
@@ -169,12 +169,12 @@ final class UsageDailyRepositoryTest extends TestCase
         $daily = $this->subject->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
         $monthly = $this->subject->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            UsageDailyReportInterface::GRANULARITY_MONTH
         );
 
         self::assertSame(['2026-01-05', '2026-01-06', '2026-02-01'], array_column($daily, 'period'));
@@ -316,7 +316,7 @@ final class FakeUsageDailyResource implements UsageDailyResourceInterface
     {
         $buckets = [];
         foreach ($this->rowsInWindow($from, $to) as $row) {
-            $period = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            $period = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH
                 ? substr((string) $row['usage_date'], 0, 7)
                 : (string) $row['usage_date'];
             $buckets[$period][] = $row;

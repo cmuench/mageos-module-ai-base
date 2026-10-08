@@ -105,7 +105,7 @@ interface UsageLogResourceInterface
     /**
      * Sums every token count in `[$from, $to)`, bucketed per store-timezone day or month.
      *
-     * See {@see \MageOS\AiBase\Api\UsageRecordRepositoryInterface::seriesRange()} for the full
+     * See {@see \MageOS\AiBase\Model\Usage\UsageRecordReportInterface::seriesRange()} for the full
      * contract this mirrors, including why every bucket is returned rather than only the ones
      * with data.
      *

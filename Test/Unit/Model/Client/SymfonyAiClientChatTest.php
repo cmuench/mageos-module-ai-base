@@ -582,8 +582,17 @@ final class SymfonyAiClientChatTest extends TestCase
      */
     public function test_hands_out_the_platform_it_was_built_with(): void
     {
-        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
-        $client = $this->client($platform);
+        $platform = new InMemoryPlatform('Hi');
+        $client = new SymfonyAiClient(
+            $platform,
+            'gpt-4o',
+            'openai',
+            '_row_1',
+            $this->optionNormalizer(),
+            $this->usageNormalizer(),
+            new AiExceptionMapper(),
+            new BridgeRegistry([]),
+        );
 
         self::assertInstanceOf(PlatformAwareInterface::class, $client);
         self::assertSame($platform, $client->getPlatform());

@@ -12,6 +12,8 @@ namespace MageOS\AiBase\Api\Data;
  * wording would have to know all three, which is the opposite of what a provider-agnostic client
  * is for, so the raw value stays available through ChatResponseInterface::getRawFinishReason()
  * and this enum carries the meaning.
+ *
+ * @api
  */
 enum FinishReason: string
 {

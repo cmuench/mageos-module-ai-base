@@ -8,6 +8,7 @@ use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use MageOS\AiBase\Model\Usage\UsageMaintenance;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use MageOS\AiBase\Model\Usage\UsageTransactionInterface;
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
@@ -45,6 +46,7 @@ final class UsageMaintenanceTest extends TestCase
         $this->usageDailyRepository->reportUnitsTo($this->transaction);
         $this->subject = new UsageMaintenance(
             new UsageConfig($this->scopeConfig),
+            $this->usageRecordRepository,
             $this->usageRecordRepository,
             $this->usageDailyRepository,
             new FakeTimezone('UTC'),
@@ -168,6 +170,7 @@ final class UsageMaintenanceTest extends TestCase
     {
         $subject = new UsageMaintenance(
             new UsageConfig($this->scopeConfig),
+            $this->usageRecordRepository,
             $this->usageRecordRepository,
             $this->usageDailyRepository,
             new FakeTimezone('America/New_York'),
@@ -366,16 +369,19 @@ final class UsageMaintenanceTest extends TestCase
 }
 
 /**
- * In-memory stand-in for {@see UsageRecordRepositoryInterface}. Rows are added directly through
- * {@see addRow()} with an explicit `created_at` string, rather than through {@see save()}, because
- * these tests need full control over historical timestamps that {@see save()} deliberately does
- * not expose (the real repository lets the database assign `created_at`).
+ * In-memory stand-in for {@see UsageRecordRepositoryInterface} and
+ * {@see UsageRecordReportInterface}, the two contracts the real raw-log repository implements and
+ * {@see UsageMaintenance} receives separately; a test passes the same instance for both. Rows
+ * are added directly through {@see addRow()} with an explicit `created_at` string, rather than
+ * through {@see save()}, because these tests need full control over historical timestamps that
+ * {@see save()} deliberately does not expose (the real repository lets the database assign
+ * `created_at`).
  *
  * `getList()`, `save()`, `sumRange()`, `groupRange()` and `getDistinctConsumers()` are not
  * exercised by {@see UsageMaintenance} and throw, so a test that accidentally depends on one of
  * them fails loudly instead of silently returning a meaningless default.
  */
-final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
+final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface, UsageRecordReportInterface
 {
     private ?FakeUsageTransaction $unitLog = null;
 
@@ -571,8 +577,7 @@ final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
  * {@see saveAggregates()} replaces rather than sums a colliding row the same way the real
  * insert-on-duplicate statement does.
  *
- * `getList()`, `sumRange()`, `groupRange()` and `seriesRange()` are not exercised by
- * {@see UsageMaintenance} and throw.
+ * `getList()` is not exercised by {@see UsageMaintenance} and throws.
  */
 final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
 {
@@ -623,57 +628,12 @@ final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
         return count($keysToDelete);
     }
 
-    public function sumRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        ?string $consumer = null,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by UsageMaintenanceTest.');
-    }
-
-    public function groupRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $groupBy,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by UsageMaintenanceTest.');
-    }
-
-    public function seriesRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by UsageMaintenanceTest.');
-    }
-
     /**
      * @return array<int,array<string,int|string|null>>
      */
     public function getStoredRows(): array
     {
         return array_values($this->rowsByKey);
-    }
-
-    /**
-     * Not exercised by this test's subject; present so the fake satisfies the interface.
-     *
-     * @return array<int,array<string,int|string|null>>
-     */
-    public function seriesRangeGrouped(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        string $groupBy,
-        ?int $storeId = null
-    ): array {
-        return [];
     }
 }
 

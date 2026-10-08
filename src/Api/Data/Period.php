@@ -27,6 +27,9 @@ use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
  * bug, not a customisation. Hence the sniff is switched off for this file alone.
  */
 // phpcs:disable Magento2.Functions.StaticFunction
+/**
+ * @api
+ */
 class Period
 {
     /**

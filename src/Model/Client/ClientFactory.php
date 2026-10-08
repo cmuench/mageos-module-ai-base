@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Client;
 
 use Magento\Framework\Exception\LocalizedException;
-use MageOS\AiBase\AiServices\LmStudio;
-use MageOS\AiBase\AiServices\Ollama;
 use MageOS\AiBase\Api\AiClientFactoryInterface;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
+use MageOS\AiBase\Api\PlatformArgumentsProviderInterface;
 use MageOS\AiBase\Api\PlatformAwareInterface;
+use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 
 /**
@@ -33,6 +33,7 @@ class ClientFactory implements AiClientFactoryInterface
      *        {@see PlatformAwareInterface}
      * @param RecordingPlatformAwareAiClientFactory $recordingPlatformAwareClientFactory Wraps a
      *        client that is {@see PlatformAwareInterface}, so the decorator keeps that contract
+     * @param ServiceRegistry $serviceRegistry Asked for each provider's bridge factory arguments
      */
     public function __construct(
         private readonly AiServiceSelectorInterface $serviceSelector,
@@ -41,6 +42,7 @@ class ClientFactory implements AiClientFactoryInterface
         private readonly UsageConfig $usageConfig,
         private readonly RecordingAiClientFactory $recordingClientFactory,
         private readonly RecordingPlatformAwareAiClientFactory $recordingPlatformAwareClientFactory,
+        private readonly ServiceRegistry $serviceRegistry,
     ) {
     }
 
@@ -264,42 +266,14 @@ class ClientFactory implements AiClientFactoryInterface
 
         $config = $service->getConfiguration();
 
-        // Bridge Factory::createPlatform() signatures vary by provider (verified
-        // against symfony/ai-platform v0.14.0): hosted providers take an API key;
-        // local runtimes take an endpoint/base URL; openai_compatible takes both, since unlike
-        // Ollama/LM Studio it fronts no specific runtime and cannot assume one is unauthenticated;
-        // Azure takes endpoint + deployment (the selected model) + API version + key.
-        //
-        // Every arm ends in optionalArguments() so that no provider is left out of the model
+        // Every call ends in optionalArguments() so that no provider is left out of the model
         // catalogue: the ones that take their endpoint positionally are also the ones with a
         // free-text model field, which makes them the likeliest to hold a model no static
         // catalogue lists.
-        $platform = match ($code) {
-            'ollama' => $factoryClass::createPlatform(
-                $this->resolveBaseUrl($config, Ollama::DEFAULT_BASE_URL),
-                ...$this->optionalArguments($factoryClass, $code, $config),
-            ),
-            'lmstudio' => $factoryClass::createPlatform(
-                $this->resolveBaseUrl($config, LmStudio::DEFAULT_BASE_URL),
-                ...$this->optionalArguments($factoryClass, $code, $config),
-            ),
-            'openai_compatible' => $factoryClass::createPlatform(
-                $this->resolveOpenAiCompatibleBaseUrl($config),
-                $this->stringValue($config, 'api_key') ?: null,
-                ...$this->optionalArguments($factoryClass, $code, $config),
-            ),
-            'azure' => $factoryClass::createPlatform(
-                $this->stringValue($config, 'endpoint'),
-                $this->stringValue($config, 'deployment') ?: $this->stringValue($config, 'model'),
-                $this->stringValue($config, 'api_version', '2024-10-21'),
-                $this->stringValue($config, 'api_key'),
-                ...$this->optionalArguments($factoryClass, $code, $config),
-            ),
-            default => $factoryClass::createPlatform(
-                $this->stringValue($config, 'api_key'),
-                ...$this->optionalArguments($factoryClass, $code, $config),
-            ),
-        };
+        $platform = $factoryClass::createPlatform(
+            ...$this->platformArguments($code, $config),
+            ...$this->optionalArguments($factoryClass, $code, $config),
+        );
 
         // The factory class comes from di.xml, so what it hands back is only ever as good as the
         // registration. Checking here names the bridge that misbehaved; without it the mistake
@@ -473,40 +447,22 @@ class ClientFactory implements AiClientFactoryInterface
     }
 
     /**
-     * Read a base URL out of a stored service row, falling back to the provider's own host.
+     * The leading positional arguments for the provider's bridge factory.
      *
-     * Rows saved before the field existed have no `base_url` at all, and a row saved with the
-     * input cleared has an empty one; both mean "wherever the provider normally lives". The
-     * trailing slash goes because the bridges append their own path to whatever they are given,
-     * and a doubled separator is a 404 that reads like an authentication problem.
+     * Bridge factory signatures differ by provider, so the provider says what its factory takes
+     * (see {@see PlatformArgumentsProviderInterface}). A provider that does not say gets the API key
+     * alone, which is what hosted providers' factories take first.
      *
+     * @param string $code Service code
      * @param array<string,mixed> $config Stored service configuration
-     * @param string $default Provider's own base URL
-     * @return string
+     * @return list<mixed>
      */
-    private function resolveBaseUrl(array $config, string $default): string
+    private function platformArguments(string $code, array $config): array
     {
-        $baseUrl = $config['base_url'] ?? null;
-        $baseUrl = is_string($baseUrl) && trim($baseUrl) !== '' ? trim($baseUrl) : $default;
+        $provider = $this->serviceRegistry->get($code);
 
-        return rtrim($baseUrl, '/');
-    }
-
-    /**
-     * Read the openai_compatible base URL, stripping a trailing API version segment.
-     *
-     * {@see \Symfony\AI\Platform\Bridge\Generic\Factory::createPlatform()}'s bridge always appends
-     * `/v1/chat/completions` itself, so an administrator pasting the `/v1`-suffixed URL their gateway
-     * shows them (as LiteLLM and most OpenAI-compatible gateways do) would otherwise double it into a
-     * path the gateway 404s on, with nothing in the response pointing at why.
-     *
-     * @param array<string,mixed> $config Stored service configuration
-     * @return string
-     */
-    private function resolveOpenAiCompatibleBaseUrl(array $config): string
-    {
-        $baseUrl = rtrim(trim($this->stringValue($config, 'base_url')), '/');
-
-        return preg_replace('#/v1$#', '', $baseUrl) ?? $baseUrl;
+        return $provider instanceof PlatformArgumentsProviderInterface
+            ? $provider->getPlatformArguments($config)
+            : [$this->stringValue($config, 'api_key')];
     }
 }

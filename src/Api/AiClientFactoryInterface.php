@@ -8,6 +8,12 @@ use Magento\Framework\Exception\LocalizedException;
 
 /**
  * Creates ready-to-use AI clients from the services configured in the admin.
+ *
+ * Stable to call. Methods may be added in a minor release, so a store that replaces the client
+ * stack through a `<preference>` has to add them too; to change what it does without taking that
+ * on, write a plugin on it instead.
+ *
+ * @api
  */
 interface AiClientFactoryInterface
 {
