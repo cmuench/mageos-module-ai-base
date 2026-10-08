@@ -17,6 +17,7 @@ use MageOS\AiBase\Model\Client\OptionNormalizer;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Symfony\AI\Platform\Model;
 use Symfony\AI\Platform\Result\DeferredResult;
 use Symfony\AI\Platform\Result\InMemoryRawResult;
@@ -204,6 +205,7 @@ final class SymfonyAiClientStreamFailureTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
     }
 

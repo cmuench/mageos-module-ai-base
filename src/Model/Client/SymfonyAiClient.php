@@ -26,6 +26,7 @@ use MageOS\AiBase\Model\Chat\Reasoning;
 use MageOS\AiBase\Model\Chat\StreamChunk;
 use MageOS\AiBase\Model\Chat\TokenUsage;
 use MageOS\AiBase\Model\Chat\ToolCall;
+use Psr\Log\LoggerInterface;
 
 /**
  * Adapter around a symfony/ai-platform Platform instance.
@@ -108,6 +109,8 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      *        so the reasoning-include workaround below applies only to the bridges that need it.
      *        Required, like the normalizers, because Magento only auto-wires a required class-typed
      *        argument and compiles an optional one's default into generated/metadata as a value
+     * @param LoggerInterface $logger Records the one failure this client deliberately absorbs
+     *        instead of throwing; see {@see extractTruncatedStreamReasoning()}
      * @param string|null $consumer Feature or module the factory attributed this client to;
      *        read back, normalized, through getConsumer()
      */
@@ -120,6 +123,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         private readonly UsageNormalizer $usageNormalizer,
         private readonly AiExceptionMapper $exceptionMapper,
         private readonly BridgeRegistry $bridgeRegistry,
+        private readonly LoggerInterface $logger,
         private readonly ?string $consumer = null,
     ) {
     }
@@ -966,7 +970,9 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      * thinking event has been converted, and StreamResult's reassembled turn has kept those blocks,
      * signatures included. Leaving them out of the returned turn would make a tool loop replay it
      * without the signed reasoning Anthropic requires back (issue #63). Reading the turn is not
-     * worth failing a truncated answer over, so anything going wrong here means no reasoning.
+     * worth failing a truncated answer over, so anything going wrong here means no reasoning. It is
+     * logged, though: a turn replayed without it is rejected by the provider on the next request,
+     * and this line is the only trace of why.
      *
      * @param \Symfony\AI\Platform\Result\DeferredResult $result
      * @return list<Reasoning>
@@ -975,7 +981,13 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
     {
         try {
             return $this->extractStreamedReasoning($result);
-        } catch (\Throwable) {
+        } catch (\Throwable $failure) {
+            $this->logger->warning(
+                'AI client: the reasoning of a truncated stream could not be read, the turn is returned without it: '
+                    . $failure->getMessage(),
+                ['exception' => $failure, 'service_id' => $this->serviceId, 'model' => $this->model],
+            );
+
             return [];
         }
     }

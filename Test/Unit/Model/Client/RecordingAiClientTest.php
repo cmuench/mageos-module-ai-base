@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
+require_once __DIR__ . '/../../Stubs/RecordingLogger.php';
+
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\App\Area;
@@ -34,6 +36,7 @@ use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
+use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
 use Symfony\AI\Platform\PlatformInterface;
 use Symfony\AI\Platform\Test\InMemoryPlatform;
 
@@ -55,10 +58,13 @@ final class RecordingAiClientTest extends TestCase
 
     private FakeLogger $logger;
 
+    private RecordingLogger $storeResolverLogger;
+
     protected function setUp(): void
     {
         $this->repository = new FakeUsageRecordRepository();
         $this->logger = new FakeLogger();
+        $this->storeResolverLogger = new RecordingLogger();
     }
 
     public function test_it_returns_the_wrapped_client_response_unchanged_from_chat(): void
@@ -232,6 +238,26 @@ final class RecordingAiClientTest extends TestCase
 
         self::assertSame('Hi', $response->getText());
         self::assertSame(0, $this->repository->getSavedRecords()[0]->getStoreId());
+    }
+
+    public function test_it_logs_a_store_lookup_that_failed_so_the_store_0_row_can_be_traced(): void
+    {
+        $storeManager = new FakeStoreManager(2, 1);
+        $storeManager->givenDefaultStoreViewLookupFails(new \RuntimeException('store table unavailable'));
+
+        $this->subject($this->succeedingDelegate(), $storeManager, new FakeAppState(Area::AREA_CRONTAB))
+            ->chat($this->request());
+
+        self::assertSame('warning', $this->storeResolverLogger->getRecords()[0]['level']);
+        self::assertStringContainsString('store table unavailable', $this->storeResolverLogger->getMessages());
+    }
+
+    public function test_it_logs_nothing_when_the_store_resolves(): void
+    {
+        $this->subject($this->succeedingDelegate(), new FakeStoreManager(2, 1), new FakeAppState(Area::AREA_CRONTAB))
+            ->chat($this->request());
+
+        self::assertSame([], $this->storeResolverLogger->getRecords());
     }
 
     public function test_it_records_cached_and_reasoning_token_counts_when_the_response_carries_them(): void
@@ -488,7 +514,7 @@ final class RecordingAiClientTest extends TestCase
         $subject = new RecordingPlatformAwareAiClient(
             $delegate,
             $this->repository,
-            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), $this->storeResolverLogger),
             $this->logger,
         );
 
@@ -502,7 +528,7 @@ final class RecordingAiClientTest extends TestCase
         $subject = new RecordingPlatformAwareAiClient(
             $delegate,
             $this->repository,
-            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+            new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), $this->storeResolverLogger),
             $this->logger,
         );
 
@@ -558,6 +584,7 @@ final class RecordingAiClientTest extends TestCase
             new UsageStoreResolver(
                 $storeManager ?? new FakeStoreManager(1),
                 $appState ?? new FakeAppState(Area::AREA_FRONTEND),
+                $this->storeResolverLogger,
             ),
             $this->logger,
         );

@@ -8,6 +8,7 @@ use Magento\Framework\App\Area;
 use Magento\Framework\App\State;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Store\Model\StoreManagerInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Decides which store id a usage row is attributed to.
@@ -55,10 +56,13 @@ class UsageStoreResolver
      * @param StoreManagerInterface $storeManager Names the current store and the default store
      *        view it has to be compared against outside a storefront area
      * @param State $appState Tells a storefront request apart from admin, cron and CLI
+     * @param LoggerInterface $logger Records a store lookup that failed, since the row it falls
+     *        back to cannot be told apart from genuine admin, cron and CLI traffic afterwards
      */
     public function __construct(
         private readonly StoreManagerInterface $storeManager,
         private readonly State $appState,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -67,7 +71,8 @@ class UsageStoreResolver
      *
      * Never throws for a store lookup that fails: recording runs alongside an AI call that may
      * already have succeeded, and a store that cannot be resolved must not turn that into a
-     * failure. Such a call is recorded under store 0, the same as one made with no store at all.
+     * failure. Such a call is recorded under store 0, the same as one made with no store at all,
+     * and the failure is logged: once written, that row looks like admin, cron or CLI spend.
      *
      * @return int
      */
@@ -77,9 +82,26 @@ class UsageStoreResolver
             return $this->isStorefrontArea()
                 ? (int) $this->storeManager->getStore()->getId()
                 : $this->getEmulatedStoreId();
-        } catch (\Throwable) {
-            return self::ADMIN_STORE_ID;
+        } catch (\Throwable $failure) {
+            return $this->recordUnderAdminStore($failure);
         }
+    }
+
+    /**
+     * Log a store lookup that failed and fall back to store 0.
+     *
+     * @param \Throwable $failure
+     * @return int
+     */
+    private function recordUnderAdminStore(\Throwable $failure): int
+    {
+        $this->logger->warning(
+            'AI usage: the current store could not be resolved, the call is recorded under store 0: '
+                . $failure->getMessage(),
+            ['exception' => $failure],
+        );
+
+        return self::ADMIN_STORE_ID;
     }
 
     /**

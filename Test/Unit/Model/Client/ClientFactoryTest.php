@@ -33,6 +33,7 @@ use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
@@ -322,6 +323,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -378,6 +380,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -657,7 +660,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -704,6 +707,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -711,7 +715,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -733,7 +737,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -756,7 +760,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -784,6 +788,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -791,7 +796,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -819,6 +824,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -826,7 +832,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND)),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );

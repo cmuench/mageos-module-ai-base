@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
+require_once __DIR__ . '/../../Stubs/RecordingLogger.php';
+
 use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\Api\Data\FinishReason as AiBaseFinishReason;
 use MageOS\AiBase\Api\Data\MessageRole;
@@ -23,6 +25,9 @@ use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Symfony\AI\Platform\FinishReason\FinishReason;
 use Symfony\AI\Platform\FinishReason\FinishReasonCase;
 use Symfony\AI\Platform\Message\Message;
@@ -431,6 +436,29 @@ final class SymfonyAiClientChatTest extends TestCase
         self::assertSame(AiBaseFinishReason::Length, $response->getFinishReason());
     }
 
+    /**
+     * Reading the reasoning off a truncated stream is allowed to fail without failing the answer,
+     * but not silently: the turn then replays without its signed reasoning (issue #63), and the
+     * log line is the only trace of why the provider rejects the next request.
+     */
+    public function test_a_truncated_stream_whose_reasoning_cannot_be_read_still_answers_and_logs_why(): void
+    {
+        $logger = new RecordingLogger();
+        $platform = new FakePlatform(new FakeResult(
+            deltas: [new TextDelta('Partial')],
+            resultFailure: new \RuntimeException('assistant message unavailable'),
+            streamFailure: new \Symfony\AI\Platform\Exception\MaxOutputTokensException('truncated'),
+        ));
+
+        $stream = $this->clientLoggingTo($platform, $logger)->streamChat($this->helloRequest());
+        iterator_to_array($stream, false);
+
+        self::assertSame('Partial', $stream->getReturn()->getText());
+        self::assertSame([], $stream->getReturn()->getReasoning());
+        self::assertSame('warning', $logger->getRecords()[0]['level']);
+        self::assertStringContainsString('assistant message unavailable', $logger->getMessages());
+    }
+
     public function test_complete_returns_plain_text_for_a_single_prompt(): void
     {
         $platform = new FakePlatform(new FakeResult(new TextResult('A fine description.')));
@@ -587,6 +615,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
 
         self::assertSame(UsageRecordInterface::CONSUMER_UNKNOWN, $client->getConsumer());
@@ -607,6 +636,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
             '   ',
         );
 
@@ -630,6 +660,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
 
         self::assertInstanceOf(PlatformAwareInterface::class, $client);
@@ -653,6 +684,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
 
         self::assertInstanceOf(PlatformInterface::class, $client->getPlatform());
@@ -860,6 +892,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['openai' => ['dialect' => 'openai_responses']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest());
@@ -879,6 +912,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['anthropic' => ['dialect' => 'anthropic_messages']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest());
@@ -903,6 +937,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['openai' => ['dialect' => 'openai_responses']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest(), ['include' => ['file_search_call.results']]);
@@ -1079,6 +1114,14 @@ final class SymfonyAiClientChatTest extends TestCase
 
     private function client(FakePlatform $platform, string $serviceCode = 'openai'): SymfonyAiClient
     {
+        return $this->clientLoggingTo($platform, new NullLogger(), $serviceCode);
+    }
+
+    private function clientLoggingTo(
+        FakePlatform $platform,
+        LoggerInterface $logger,
+        string $serviceCode = 'openai',
+    ): SymfonyAiClient {
         return new SymfonyAiClient(
             $platform,
             'gpt-4o',
@@ -1088,6 +1131,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            $logger,
         );
     }
 
@@ -1106,6 +1150,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['azure' => ['model_override' => false]]),
+            new NullLogger(),
         );
     }
 
@@ -1403,6 +1448,7 @@ final class FakeResult
         private readonly ?Metadata $metadata = null,
         private readonly array $deltas = [],
         private readonly ?\Throwable $resultFailure = null,
+        private readonly ?\Throwable $streamFailure = null,
     ) {
     }
 
@@ -1423,6 +1469,10 @@ final class FakeResult
     public function asStream(): \Generator
     {
         yield from $this->deltas;
+
+        if ($this->streamFailure !== null) {
+            throw $this->streamFailure;
+        }
     }
 
     public function getAssistantMessage(): AssistantMessage

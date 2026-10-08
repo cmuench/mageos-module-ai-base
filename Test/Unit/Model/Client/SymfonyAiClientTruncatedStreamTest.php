@@ -14,6 +14,7 @@ use MageOS\AiBase\Model\Client\OptionNormalizer;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Symfony\AI\Platform\Bridge\Anthropic\Factory;
 use Symfony\Component\HttpClient\MockHttpClient;
 use Symfony\Component\HttpClient\Response\MockResponse;
@@ -114,6 +115,7 @@ SSE;
             new UsageNormalizer(new BridgeRegistry(['anthropic' => ['cache_outside_prompt' => true]])),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
     }
 
