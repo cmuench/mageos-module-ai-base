@@ -92,6 +92,9 @@ Since v0.0.1:
   value is actually locked.
 
 ### Security
+- The bundled client never follows an HTTP redirect, so a provider credential sent in its own
+  header (Azure's `api-key`) cannot be carried to another host by a 3xx response
+  ([#64](https://github.com/mage-os-lab/module-ai-base/issues/64)).
 - Credentials are encrypted at rest, masked as `******` in the form, dumped to `env.php` rather
   than the commonly committed `config.php`, and re-encrypted when the encryption key is rotated.
 - A stored key is dropped when a row's endpoint changes in the same save, for any field a provider

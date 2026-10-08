@@ -33,6 +33,9 @@ use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\AI\Platform\Test\InMemoryPlatform;
 
 final class ClientFactoryTest extends TestCase
@@ -52,6 +55,7 @@ final class ClientFactoryTest extends TestCase
         $this->usageTrackingEnabled = false;
 
         RecordingAnthropicFactory::$apiKey = null;
+        RecordingAnthropicFactory::$httpClient = null;
         RecordingAnthropicFactory::$modelCatalog = null;
         RecordingLocalRuntimeFactory::$baseUrl = null;
     }
@@ -66,7 +70,7 @@ final class ClientFactoryTest extends TestCase
      * @param BridgeRegistry $bridgeRegistry
      * @return ClientFactory
      */
-    private function newSubject(BridgeRegistry $bridgeRegistry): ClientFactory
+    private function newSubject(BridgeRegistry $bridgeRegistry, ?HttpClientInterface $httpClient = null): ClientFactory
     {
         return new ClientFactory(
             $this->serviceSelector,
@@ -76,6 +80,7 @@ final class ClientFactoryTest extends TestCase
             $this->recordingClientFactory,
             $this->recordingPlatformAwareClientFactory,
             $this->serviceRegistry(),
+            $httpClient,
         );
     }
 
@@ -405,6 +410,38 @@ final class ClientFactoryTest extends TestCase
      * The catalogue is frozen at the installed bridge version, so a model the provider shipped
      * later is unroutable no matter how valid the credentials. The administrator's choice wins.
      */
+    /**
+     * A provider's own credential header (Azure's `api-key`) survives a redirect to another host,
+     * unlike `Authorization`, so the client every bridge gets must not follow redirects at all.
+     * Issue #64.
+     */
+    public function test_create_hands_the_bridge_an_http_client_that_does_not_follow_redirects(): void
+    {
+        $sentOptions = [];
+        $transport = new MockHttpClient(
+            static function (string $method, string $url, array $options) use (&$sentOptions): MockResponse {
+                $sentOptions[] = $options;
+
+                return new MockResponse('', ['http_code' => 307, 'response_headers' => ['Location: https://elsewhere.test/']]);
+            }
+        );
+        $this->serviceSelector->method('getByCode')->with('anthropic')->willReturn([
+            new AiService('row_anthropic', 'anthropic', ['api_key' => 'k', 'model' => 'claude-sonnet-5']),
+        ]);
+        $this->clientFactory->method('create')->willReturn($this->createMock(SymfonyAiClient::class));
+        $subject = $this->newSubject(new BridgeRegistry([
+            'anthropic' => ['factory' => RecordingAnthropicFactory::class, 'package' => 'symfony/ai-anthropic-platform'],
+        ]), $transport);
+
+        $subject->create('anthropic');
+        $status = RecordingAnthropicFactory::$httpClient->request('POST', 'https://api.anthropic.test/v1/messages')
+            ->getStatusCode();
+
+        self::assertSame(307, $status, 'The redirect is reported, not followed.');
+        self::assertCount(1, $sentOptions);
+        self::assertSame(0, $sentOptions[0]['max_redirects']);
+    }
+
     public function test_create_registers_a_model_the_bridge_catalogue_does_not_know(): void
     {
         $this->serviceSelector->method('getByCode')->with('anthropic')->willReturn([
@@ -823,6 +860,7 @@ final class FakePlatformFactory
 final class RecordingAnthropicFactory
 {
     public static ?string $apiKey = null;
+    public static ?object $httpClient = null;
     public static ?object $modelCatalog = null;
 
     public static function createPlatform(
@@ -837,6 +875,7 @@ final class RecordingAnthropicFactory
         string $baseUrl = 'https://api.anthropic.com',
     ): object {
         self::$apiKey = $apiKey;
+        self::$httpClient = $httpClient;
         self::$modelCatalog = $modelCatalog;
 
         return new \stdClass();

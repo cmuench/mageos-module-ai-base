@@ -46,7 +46,8 @@
         "magento/module-ui": "^101.2 || ^102.0",
         "symfony/ai-anthropic-platform": "^0.14",
         "symfony/ai-open-ai-platform": "^0.14",
-        "symfony/ai-platform": "^0.14"
+        "symfony/ai-platform": "^0.14",
+        "symfony/http-client": "^7.3 || ^8.0"
     },
     "suggest": {
         "symfony/ai-azure-platform": "Enables the bundled AI client and Test Connection for Azure OpenAI.",

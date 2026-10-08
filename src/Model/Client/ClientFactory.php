@@ -13,6 +13,8 @@ use MageOS\AiBase\Api\PlatformArgumentsProviderInterface;
 use MageOS\AiBase\Api\PlatformAwareInterface;
 use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Model\Usage\UsageConfig;
+use Symfony\Component\HttpClient\HttpClient;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Builds AiClientInterface instances backed by symfony/ai-platform provider bridges.
@@ -34,6 +36,9 @@ class ClientFactory implements AiClientFactoryInterface
      * @param RecordingPlatformAwareAiClientFactory $recordingPlatformAwareClientFactory Wraps a
      *        client that is {@see PlatformAwareInterface}, so the decorator keeps that contract
      * @param ServiceRegistry $serviceRegistry Asked for each provider's bridge factory arguments
+     * @param HttpClientInterface|null $httpClient Transport handed to every bridge, with redirects
+     *        switched off on top of it; Symfony's own client when none is given. Exists so a test
+     *        can see the options a bridge's requests actually go out with.
      */
     public function __construct(
         private readonly AiServiceSelectorInterface $serviceSelector,
@@ -43,6 +48,7 @@ class ClientFactory implements AiClientFactoryInterface
         private readonly RecordingAiClientFactory $recordingClientFactory,
         private readonly RecordingPlatformAwareAiClientFactory $recordingPlatformAwareClientFactory,
         private readonly ServiceRegistry $serviceRegistry,
+        private readonly ?HttpClientInterface $httpClient = null,
     ) {
     }
 
@@ -315,11 +321,30 @@ class ClientFactory implements AiClientFactoryInterface
         $model = $config['model'] ?? null;
 
         $arguments = [];
+        if (isset($accepted['httpClient'])) {
+            $arguments['httpClient'] = $this->createHttpClient();
+        }
         $catalog = $this->createCatalog($code, is_string($model) ? $model : '');
         if ($catalog !== null && isset($accepted['modelCatalog'])) {
             $arguments['modelCatalog'] = $catalog;
         }
         return $arguments;
+    }
+
+    /**
+     * The HTTP client every bridge sends its requests through, with redirects switched off.
+     *
+     * Symfony's HTTP client follows redirects and strips the `Authorization` header when one
+     * changes host, but not a provider's own credential header: Azure authenticates with
+     * `api-key`, which a redirect to another host would carry along. A provider API answers a
+     * request, it never redirects one, so a 3xx is reported as the failure it is instead of
+     * sending the credential somewhere the administrator never configured.
+     *
+     * @return HttpClientInterface
+     */
+    private function createHttpClient(): HttpClientInterface
+    {
+        return ($this->httpClient ?? HttpClient::create())->withOptions(['max_redirects' => 0]);
     }
 
     /**

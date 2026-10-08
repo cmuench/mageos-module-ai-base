@@ -366,6 +366,9 @@ saves so credential restore can match rows.
   pass through reads unchanged; they get encrypted on the next admin save.
 - **CSP**: all form JavaScript is emitted through `SecureHtmlRenderer` (hash/nonce), safe
   under strict admin CSP.
+- **No redirects**: `ClientFactory` hands every bridge an HTTP client with `max_redirects` set to
+  0. Symfony strips `Authorization` on a cross-host redirect but not a provider's own header such
+  as Azure's `api-key`, and a provider API never legitimately redirects a request.
 - **Endpoints**: `Service\Test` and `Service\RefreshModels` are POST-only, form-key validated
   (enforced by the `Backend\App\AbstractAction` plugin chain — which is why they extend
   `Backend\App\Action` rather than using pure composition), and gated by the
