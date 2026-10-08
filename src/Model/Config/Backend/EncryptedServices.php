@@ -14,6 +14,7 @@ use Magento\Framework\Model\ResourceModel\AbstractResource;
 use Magento\Framework\Registry;
 use Magento\Framework\Serialize\Serializer\Json;
 use MageOS\AiBase\Model\Config\SensitiveDataProcessor;
+use MageOS\AiBase\Model\Config\UnregisteredRowKeeper;
 
 /**
  * Serialized services config with credential fields encrypted at rest.
@@ -27,6 +28,10 @@ use MageOS\AiBase\Model\Config\SensitiveDataProcessor;
  *
  * A form post is only accepted once the form's JavaScript finished rendering it. See
  * {@see RENDERED_MARKER} for why.
+ *
+ * Stored rows whose provider is no longer registered are kept unless the post deletes them by id,
+ * because the form cannot render inputs for them and so never posts them. See
+ * {@see UnregisteredRowKeeper} and {@see DELETED_MARKER}.
  */
 class EncryptedServices extends ArraySerialized
 {
@@ -51,12 +56,23 @@ class EncryptedServices extends ArraySerialized
     public const RENDERED_MARKER = '__rendered';
 
     /**
+     * Key under which the admin form posts the ids of unregistered-provider rows deleted on purpose.
+     *
+     * Such a row posts no fields, so leaving it out of the post cannot mean "delete it" (that is
+     * exactly what every unrelated save does). Its delete button posts its id here instead, which
+     * is the one way such a row leaves the stored value. The ids travel as values rather than keys,
+     * so a stored id is never parsed as part of a field name.
+     */
+    public const DELETED_MARKER = '__deleted';
+
+    /**
      * @param Context $context
      * @param Registry $registry
      * @param ScopeConfigInterface $config
      * @param TypeListInterface $cacheTypeList
      * @param SensitiveDataProcessor $sensitiveDataProcessor
      * @param Json $jsonSerializer
+     * @param UnregisteredRowKeeper $unregisteredRowKeeper
      * @param AbstractResource|null $resource
      * @param AbstractDb|null $resourceCollection
      * @param array<string,mixed> $data
@@ -68,6 +84,7 @@ class EncryptedServices extends ArraySerialized
         TypeListInterface $cacheTypeList,
         private readonly SensitiveDataProcessor $sensitiveDataProcessor,
         private readonly Json $jsonSerializer,
+        private readonly UnregisteredRowKeeper $unregisteredRowKeeper,
         ?AbstractResource $resource = null,
         ?AbstractDb $resourceCollection = null,
         array $data = []
@@ -87,6 +104,9 @@ class EncryptedServices extends ArraySerialized
     /**
      * Restore placeholder-masked credentials from stored config, then encrypt before persisting.
      *
+     * Stored rows of unregistered providers are added back after the posted rows are encrypted,
+     * so they skip encryptRow() and land byte for byte as they were stored.
+     *
      * @return $this
      * @throws ValidatorException When the admin form posted without having finished rendering
      */
@@ -95,18 +115,23 @@ class EncryptedServices extends ArraySerialized
         $value = $this->getValue();
         if (is_array($value)) {
             $this->assertFormRendered($value);
-            unset($value[self::RENDERED_MARKER]);
+            $deletedRowIds = $this->getDeletedRowIds($value);
+            unset($value[self::RENDERED_MARKER], $value[self::DELETED_MARKER]);
             $stored = $this->getStoredRows();
-            $this->setValue($this->mapRows(
-                $value,
-                fn (array $row, string $rowId, string $service): array => $this->sensitiveDataProcessor->encryptRow(
-                    $service,
-                    $this->sensitiveDataProcessor->restoreRow(
+            $this->setValue($this->unregisteredRowKeeper->keep(
+                $this->mapRows(
+                    $value,
+                    fn (array $row, string $rowId, string $service): array => $this->sensitiveDataProcessor->encryptRow(
                         $service,
-                        $row,
-                        $this->storedRow($stored, $rowId, $service)
-                    )
+                        $this->sensitiveDataProcessor->restoreRow(
+                            $service,
+                            $row,
+                            $this->storedRow($stored, $rowId, $service)
+                        )
+                    ),
                 ),
+                $stored,
+                $deletedRowIds,
             ));
         }
 
@@ -135,6 +160,22 @@ class EncryptedServices extends ArraySerialized
             . 'would have removed services that were not shown. Reload the page and try again. If it '
             . 'keeps happening, check the browser console for a script error.'
         ));
+    }
+
+    /**
+     * Row ids the post asks to delete through {@see DELETED_MARKER}.
+     *
+     * Anything that is not a list of strings there is ignored rather than refused: the marker can
+     * only remove rows, so ignoring a malformed one errs on the side of keeping data.
+     *
+     * @param array<array-key,mixed> $value
+     * @return list<string>
+     */
+    private function getDeletedRowIds(array $value): array
+    {
+        $deleted = $value[self::DELETED_MARKER] ?? [];
+
+        return is_array($deleted) ? array_values(array_filter($deleted, 'is_string')) : [];
     }
 
     /**

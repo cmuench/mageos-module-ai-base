@@ -193,6 +193,61 @@ final class ServicesTemplateEscapingTest extends TestCase
     }
 
     /**
+     * A row whose provider is not registered reaches the script as plain strings: its code, its
+     * label and its id. All three are stored data, so each goes through escapeJs(), and none of the
+     * row's values (its masked credentials included) is handed to the script at all.
+     */
+    public function test_unregistered_rows_are_encoded_into_their_placeholder_calls(): void
+    {
+        preg_match('/if \(!\$_row\[\'registered\'\]\) \{(.*?)\n        \}/s', $this->template, $branch);
+        self::assertArrayHasKey(1, $branch, 'The unregistered-row branch is gone; this guard now checks nothing.');
+
+        self::assertStringContainsString('addUnregisteredRow(', $branch[1]);
+        self::assertStringContainsString("escapeJs(\$_row['code'])", $branch[1]);
+        self::assertStringContainsString("escapeJs(\$_row['label'])", $branch[1]);
+        self::assertStringContainsString("escapeJs(\$_row['id'])", $branch[1]);
+        self::assertStringNotContainsString("\$_row['values']", $branch[1]);
+    }
+
+    /**
+     * Every stored value the placeholder puts into markup goes through the script's escapeHtml():
+     * the heading (label and code), the row id in its attributes, and the translated notice.
+     */
+    public function test_the_unregistered_placeholder_escapes_everything_it_renders(): void
+    {
+        $function = $this->functionBody('addUnregisteredRow');
+
+        self::assertStringContainsString("'<tr id=\"' + escapeHtml(rowId) + '\"", $function);
+        self::assertStringContainsString("' data-row-id=\"' + escapeHtml(rowId) + '\"", $function);
+        self::assertStringContainsString("escapeHtml(title)", $function);
+        self::assertStringContainsString("escapeHtml('{\$unregisteredNoticeJs}')", $function);
+        self::assertDoesNotMatchRegularExpression(
+            '/\+ (label|serviceCode|title) \+ \'/',
+            $function,
+            'A stored value is concatenated into the placeholder markup without escapeHtml().'
+        );
+    }
+
+    /**
+     * The placeholder posts no field of its own, which is what lets the backend model keep the row as
+     * stored. Its only input is the deletion marker its delete button adds.
+     */
+    public function test_the_unregistered_placeholder_posts_nothing_but_its_deletion_marker(): void
+    {
+        self::assertStringNotContainsString('<input', $this->functionBody('addUnregisteredRow'));
+        self::assertStringNotContainsString('fieldNameBase', $this->functionBody('addUnregisteredRow'));
+
+        $marker = $this->functionBody('markUnregisteredRowDeleted');
+        self::assertStringContainsString("marker.name = fieldNameBase + '[{\$deletedMarkerJs}][]';", $marker);
+        self::assertStringContainsString('marker.value = button.dataset.rowId;', $marker);
+        self::assertStringContainsString('EncryptedServices::DELETED_MARKER', $this->template);
+        self::assertStringContainsString(
+            'if (deleteButton.dataset.unregistered) markUnregisteredRowDeleted(deleteButton);',
+            $this->template
+        );
+    }
+
+    /**
      * The backend model only accepts the server-rendered empty marker together with the one the
      * script adds once every stored row is on the page. Adding it any earlier, or anywhere but as
      * the last step, would let a script that failed halfway save only the rows it managed to render.
@@ -213,6 +268,17 @@ final class ServicesTemplateEscapingTest extends TestCase
     {
         self::assertStringContainsString('EncryptedServices::EMPTY_MARKER', $this->template);
         self::assertStringContainsString('EncryptedServices::RENDERED_MARKER', $this->template);
+    }
+
+    /**
+     * The body of one of the inline script's top-level functions.
+     */
+    private function functionBody(string $name): string
+    {
+        preg_match('/    function ' . $name . '\([^)]*\) \{\n(.*?)\n    \}\n/s', $this->template, $matches);
+        self::assertArrayHasKey(1, $matches, $name . '() not found in the template; this guard now checks nothing.');
+
+        return $matches[1];
     }
 
     /**

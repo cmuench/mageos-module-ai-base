@@ -138,14 +138,55 @@ final class ServicesScriptDataTest extends TestCase
         self::assertSame(['second'], $scopes);
     }
 
-    public function test_a_row_of_an_unregistered_provider_has_no_model_list_of_its_own(): void
+    /**
+     * A row whose provider module was removed is handed to the script flagged unregistered, so the
+     * form renders a placeholder for it instead of leaving it out without a word (GitHub issue #65).
+     */
+    public function test_a_row_of_an_unregistered_provider_is_handed_over_flagged_and_without_a_model_list(): void
     {
         $rows = $this->blockWithRows(['_row' => ['retired_provider' => ['model' => 'x']]])->getStoredRows();
 
         self::assertSame(
-            [['code' => 'retired_provider', 'id' => '_row', 'values' => ['model' => 'x'], 'modelOptions' => null]],
+            [[
+                'code' => 'retired_provider',
+                'id' => '_row',
+                'label' => '',
+                'registered' => false,
+                'values' => ['model' => 'x'],
+                'modelOptions' => null,
+            ]],
             $rows
         );
+    }
+
+    public function test_a_row_of_a_registered_provider_is_flagged_registered(): void
+    {
+        $this->modelListResolver->method('getModelsForRow')->willReturn([]);
+
+        $rows = $this->blockWithRows(['_row' => ['ollama' => ['model' => 'llama3']]])->getStoredRows();
+
+        self::assertTrue($rows[0]['registered']);
+    }
+
+    /**
+     * The placeholder names the row by what the administrator called it. The block hands the label
+     * over untouched; the template escapes it for the script and the script for the markup, which
+     * `ServicesTemplateEscapingTest` pins.
+     */
+    public function test_an_unregistered_row_carries_its_label_unchanged(): void
+    {
+        $rows = $this->blockWithRows([
+            '_row' => ['retired_provider' => ['_label' => self::HOSTILE, 'api_key' => '******']],
+        ])->getStoredRows();
+
+        self::assertSame(self::HOSTILE, $rows[0]['label']);
+    }
+
+    public function test_a_label_that_is_not_a_string_is_treated_as_no_label(): void
+    {
+        $rows = $this->blockWithRows(['_row' => ['retired_provider' => ['_label' => ['nested']]]])->getStoredRows();
+
+        self::assertSame('', $rows[0]['label']);
     }
 
     /**

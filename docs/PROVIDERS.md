@@ -373,6 +373,12 @@ public function __construct(
   Ollama, LM Studio) gets it as autocomplete suggestions, so an unlisted model can still be typed.
 - Credentials saved before encryption existed are detected and returned as they are, and
   encrypted on the next save of the form.
+- Removing or disabling your provider's module does not delete the rows saved for it. The form
+  shows each one as a read-only placeholder (its name and service code, no fields), and saving the
+  form keeps it exactly as stored, credentials included; `EncryptedServices` carries it over
+  server side whether or not the form posted it. Its delete button is the only thing that removes
+  it. Reinstall the module and the row comes back with the same id and credential, so selections
+  other modules stored by that id keep working.
 
 ## Testing your provider
 

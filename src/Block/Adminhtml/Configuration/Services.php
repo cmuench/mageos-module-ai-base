@@ -12,6 +12,7 @@ use Magento\Framework\DataObject;
 use Magento\Framework\Exception\LocalizedException;
 use Magento\Framework\View\Helper\SecureHtmlRenderer;
 use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
+use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
 use MageOS\AiBase\Model\AiServiceSelector;
@@ -168,9 +169,16 @@ class Services extends AbstractFieldArray
      * Rows whose configuration is not an array are left out: they are not something the form can
      * render, and passing one on would only fail the script, which is the state the form most needs
      * to avoid. The model options are per row because the list belongs to the endpoint a row points
-     * at, not to its provider; null for a provider no longer registered, which the script skips.
+     * at, not to its provider; null for a provider no longer registered.
      *
-     * @return list<array{code:string,id:string,values:array<array-key,mixed>,modelOptions:list<array{value:string,label:string}>|null}>
+     * A row of a provider that is no longer registered (its module removed or disabled) is still
+     * handed over, flagged `registered => false`, so the form shows it as a read-only placeholder
+     * instead of silently leaving it out. Left out, an administrator had no way to know the row was
+     * there, and before the backend model kept such rows the next Save Config deleted it. `label`
+     * is the administrator's own name for the row, which is the one thing besides the code that
+     * says what the placeholder used to be.
+     *
+     * @return list<array{code:string,id:string,label:string,registered:bool,values:array<array-key,mixed>,modelOptions:list<array{value:string,label:string}>|null}>
      */
     public function getStoredRows(): array
     {
@@ -184,9 +192,12 @@ class Services extends AbstractFieldArray
                 continue;
             }
             $id = (string) $rowId;
+            $label = $values[AiServiceInterface::CONFIGURATION_LABEL] ?? '';
             $rows[] = [
                 'code' => $code,
                 'id' => $id,
+                'label' => is_string($label) ? $label : '',
+                'registered' => $this->serviceRegistry->get($code) !== null,
                 'values' => $values,
                 'modelOptions' => $this->getRowModelOptions($code, $id, $scope),
             ];

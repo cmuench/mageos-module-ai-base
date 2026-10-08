@@ -197,8 +197,25 @@ $_isReadOnly = $block->isReadOnly();
     // Every value placed in the script goes through encodeForScript() or escapeJs(). A stored value
     // or a provider's model name containing "<!--<script>" otherwise switched the HTML parser into a
     // state where it swallowed the closing tag, so the script never ran and no row rendered.
+    // A row whose provider is no longer registered has no schema to build inputs from. It renders
+    // as a read-only placeholder that posts nothing: the backend model keeps it as stored, and its
+    // delete button posts the row id under DELETED_MARKER, the one way such a row is removed.
+    $unregisteredNoticeJs = $escaper->escapeJs(__(
+        'This service\'s provider is not installed or its module is disabled. The row and its '
+        . 'credentials are kept; reinstall the provider to edit it.'
+    ));
+    $deletedMarkerJs = $escaper->escapeJs(\MageOS\AiBase\Model\Config\Backend\EncryptedServices::DELETED_MARKER);
     $existingRowsJs = '';
     foreach ($block->getStoredRows() as $_row) {
+        if (!$_row['registered']) {
+            $existingRowsJs .= sprintf(
+                "    addUnregisteredRow('%s', '%s', '%s');\n",
+                $escaper->escapeJs($_row['code']),
+                $escaper->escapeJs($_row['label']),
+                $escaper->escapeJs($_row['id'])
+            );
+            continue;
+        }
         $existingRowsJs .= sprintf(
             "    addRow('%s', %s, '%s', %s);\n",
             $escaper->escapeJs($_row['code']),
@@ -466,6 +483,49 @@ require(['prototype'], function () {
         }
 
         return rowId;
+    }
+
+    /**
+     * Render a stored row whose provider is not registered here as a read-only placeholder.
+     *
+     * There is no schema to build its inputs from, and it gets none on purpose: the backend model
+     * carries the stored row over unchanged, credentials included, so posting anything for it could
+     * only get in the way of that. It shows what the row was (its name and service code) and why it
+     * cannot be edited, so it no longer vanishes from the page without a word. Its delete button is
+     * the deliberate way out; see the click handler for the marker it posts.
+     */
+    function addUnregisteredRow(serviceCode, label, rowId) {
+        const title = label === '' ? serviceCode : label + ' \u00b7 ' + serviceCode;
+        const deleteHtml = readOnly ? '' : '<button class="action-delete ai-service-row-action" type="button"'
+            + ' data-row-id="' + escapeHtml(rowId) + '" data-unregistered="1"'
+            + ' title="{$deleteLabelJs}" aria-label="{$deleteLabelJs} ' + escapeHtml(title) + '">'
+            + '<span class="ai-service-row-action-label">{$deleteLabelJs}</span></button>';
+
+        const rowHtml = '<tr id="' + escapeHtml(rowId) + '" class="ai-service-row-unregistered">'
+            + '<td><div class="ai-service-row-heading">'
+            + '<span class="ai-service-row-name">' + escapeHtml(title) + '</span>'
+            + '<div class="ai-service-row-actions">' + deleteHtml + '</div>'
+            + '</div>'
+            + '<div class="message message-warning ai-service-unregistered-notice">'
+            + escapeHtml('{$unregisteredNoticeJs}') + '</div></td>'
+            + '</tr>';
+
+        Element.insert($('addRow{$htmlIdJs}'), { bottom: rowHtml });
+    }
+
+    /**
+     * Ask the backend model to remove an unregistered-provider row. Leaving the row out of the post
+     * is not enough, since it never posts anything and the backend model keeps every such row it
+     * was not told to delete.
+     */
+    function markUnregisteredRowDeleted(button) {
+        const container = document.querySelector('.ai-services-configurator');
+        if (!container) return;
+        const marker = document.createElement('input');
+        marker.type = 'hidden';
+        marker.name = fieldNameBase + '[{$deletedMarkerJs}][]';
+        marker.value = button.dataset.rowId;
+        container.appendChild(marker);
     }
 
     /**
@@ -795,6 +855,7 @@ require(['prototype'], function () {
         // the removal becomes permanent on the next save. Asking costs one keystroke.
         if (!window.confirm('{$deleteConfirmJs}')) return;
 
+        if (deleteButton.dataset.unregistered) markUnregisteredRowDeleted(deleteButton);
         const row = document.getElementById(deleteButton.dataset.rowId);
         if (row) row.remove();
         updateEmptyState();
