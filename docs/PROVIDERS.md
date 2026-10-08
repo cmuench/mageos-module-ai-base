@@ -279,9 +279,11 @@ the admin form detects it (`supportsModelRefresh` in the schema JSON) and shows 
 automatically.
 
 Refreshing is **manual only** — an admin clicks the button; nothing fetches automatically or
-on cron. Fetched lists persist per service code at config path `mageos_ai/services/models/<code>`
-and take precedence over `getSupportedModels()` via `Model\ModelList\Resolver`, which is the
-single merge point (service classes stay pure). The curated list remains the fallback for
+on cron. Fetched lists persist per configured row at config path
+`mageos_ai/services/row_models/<row id>`, so two rows of one provider on different hosts keep their
+own lists, and take precedence over `getSupportedModels()` via `Model\ModelList\Resolver`, which
+is the single merge point (service classes stay pure). Lists stored per code by earlier versions
+(`mageos_ai/services/models/<code>`) are still read as a fallback. The curated list remains the fallback for
 stores that never refresh.
 
 ## Customization recipes

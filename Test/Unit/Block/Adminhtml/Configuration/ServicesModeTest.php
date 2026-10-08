@@ -7,7 +7,6 @@ namespace MageOS\AiBase\Test\Unit\Block\Adminhtml\Configuration;
 use Magento\Config\Block\System\Config\Form\Field\FieldArray\AbstractFieldArray;
 use Magento\Framework\App\State;
 use Magento\Framework\Exception\LocalizedException;
-use Magento\Framework\Serialize\Serializer\Json;
 use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterface;
 use MageOS\AiBase\Block\Adminhtml\Configuration\Services;
@@ -128,7 +127,6 @@ final class ServicesModeTest extends TestCase
         $reflection = new \ReflectionClass(Services::class);
         $block = $reflection->newInstanceWithoutConstructor();
 
-        $reflection->getProperty('jsonSerializer')->setValue($block, new Json());
         $reflection->getProperty('serviceRegistry')->setValue($block, new ServiceRegistry([
             $this->serviceFor('installed'),
             $this->serviceFor('missing'),

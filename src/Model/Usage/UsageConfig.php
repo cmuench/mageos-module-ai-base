@@ -12,8 +12,8 @@ use Magento\Framework\App\Config\ScopeConfigInterface;
  * Nothing else in the module is meant to touch `ScopeConfigInterface` or a raw `usage/*` path
  * string directly: the recording decorator asks {@see isEnabled()} before it writes a row, and
  * the cleanup job asks the two retention getters before it deletes anything. Every read resolves
- * at default scope with no scope argument, the same way {@see \MageOS\AiBase\Model\ModelList\Storage}
- * does, because the consumers are cron and CLI, neither of which has a website or store in play.
+ * at default scope with no scope argument, because the consumers are cron and CLI, neither of
+ * which has a website or store in play.
  */
 class UsageConfig
 {

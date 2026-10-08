@@ -9,20 +9,41 @@ use Magento\Framework\App\Cache\TypeListInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Config\Storage\WriterInterface;
 use Magento\Framework\Serialize\Serializer\Json;
+use MageOS\AiBase\Model\Config\ConfigScope;
 
 /**
- * Persists refreshed model lists per service code in core_config_data (default scope).
+ * Persists refreshed model lists per configured row in core_config_data.
  *
  * The payload is a JSON object `{"fetched_at": <unix ts>, "models": {value: label, ...}}` stored
- * at `mageos_ai/services/models/<code>`, so a manually refreshed list survives across requests
- * and feeds the admin form until the next refresh.
+ * at `mageos_ai/services/row_models/<row key>`, so a manually refreshed list survives across
+ * requests and feeds that row's model field until the next refresh.
+ *
+ * Keyed on the row rather than the provider code because the list is a property of the endpoint a
+ * row points at, not of the provider: two Ollama or LM Studio rows on different hosts serve
+ * different models, and keyed per code each refresh overwrote the other row's list. Written at the
+ * scope the row was refreshed in, so a website that overrides the services (and so carries copies
+ * of default's row ids, pointed somewhere else) keeps its own list, while a website that inherits
+ * reads default's through ordinary config inheritance.
+ *
+ * Lists written before this change live at `mageos_ai/services/models/<code>` (default scope), and
+ * are still read as a fallback so an install that refreshed before upgrading keeps its suggestions.
  */
 class Storage
 {
     /**
-     * Config path prefix; the service code is appended as the last path segment.
+     * Config path prefix of per-row lists; the row key is appended as the last path segment.
      */
-    private const CONFIG_PATH_PREFIX = 'mageos_ai/services/models/';
+    private const CONFIG_PATH_ROW_PREFIX = 'mageos_ai/services/row_models/';
+
+    /**
+     * Config path prefix of the per-code lists written before lists became per row; read only.
+     */
+    private const CONFIG_PATH_LEGACY_CODE_PREFIX = 'mageos_ai/services/models/';
+
+    /**
+     * A row id that can stand as a config path segment as it is: what the admin form generates.
+     */
+    private const SAFE_ROW_KEY_PATTERN = '/^[A-Za-z0-9_-]{1,64}$/';
 
     /**
      * Payload key holding the value => label model map.
@@ -49,13 +70,14 @@ class Storage
     }
 
     /**
-     * Persist a fetched model list for a service code (default scope) with a fetched-at timestamp.
+     * Persist a fetched model list for one configured row, at the scope it was refreshed in.
      *
-     * @param string $serviceCode
+     * @param string $rowId The row's id (`AiServiceInterface::getId()`)
      * @param array<string,string> $models Map of model value => label
+     * @param ConfigScope $scope
      * @return void
      */
-    public function save(string $serviceCode, array $models): void
+    public function saveForRow(string $rowId, array $models, ConfigScope $scope): void
     {
         // SerializerInterface still declares the string|bool return of the pre-exception days;
         // Json::serialize throws instead of returning false, so the cast only narrows the type.
@@ -63,25 +85,72 @@ class Storage
             self::KEY_FETCHED_AT => time(),
             self::KEY_MODELS => $models,
         ]);
-        $this->configWriter->save(self::CONFIG_PATH_PREFIX . $serviceCode, $payload);
+        $this->configWriter->save($this->rowPath($rowId), $payload, $scope->getType(), $scope->getId());
         // The writer bypasses the config cache; clean it so the next page load sees the new list.
         $this->cacheTypeList->cleanType(ConfigCache::TYPE_IDENTIFIER);
     }
 
     /**
-     * Load the stored model list for a service code.
+     * Load the stored model list of one configured row, as seen from the given scope.
+     *
+     * @param string $rowId
+     * @param ConfigScope $scope
+     * @return array<string,string>|null Map of model value => label, or null when nothing is stored
+     */
+    public function getModelsForRow(string $rowId, ConfigScope $scope): ?array
+    {
+        return $this->validatedModels(
+            $this->scopeConfig->getValue($this->rowPath($rowId), $scope->getType(), $scope->getCode())
+        );
+    }
+
+    /**
+     * Load the list stored per provider code by versions before lists became per row.
+     *
+     * Kept as a read-only fallback: nothing writes this path any more, but an install that refreshed
+     * a list before upgrading would otherwise lose its suggestions until each row is refreshed again.
+     *
+     * @param string $serviceCode
+     * @return array<string,string>|null Map of model value => label, or null when nothing is stored
+     */
+    public function getLegacyModels(string $serviceCode): ?array
+    {
+        return $this->validatedModels(
+            $this->scopeConfig->getValue(self::CONFIG_PATH_LEGACY_CODE_PREFIX . $serviceCode)
+        );
+    }
+
+    /**
+     * Config path of one row's list.
+     *
+     * Row ids are POST array keys and reach this class unnormalised. The ones the admin form
+     * generates (`_<timestamp>_<ms>`) are used as they are, so the stored row stays recognisable in
+     * `core_config_data`; anything else is hashed, because a `/` in it would nest the path and the
+     * reader would hand back an array where a payload belongs.
+     *
+     * @param string $rowId
+     * @return string
+     */
+    private function rowPath(string $rowId): string
+    {
+        $key = preg_match(self::SAFE_ROW_KEY_PATTERN, $rowId) === 1 ? $rowId : sha1($rowId);
+
+        return self::CONFIG_PATH_ROW_PREFIX . $key;
+    }
+
+    /**
+     * The model map of a stored payload, with every entry validated.
      *
      * Entries are validated on the way out rather than trusted: the payload is read back from
      * `core_config_data`, where a hand-edited row or a list written by an older version of this
      * module can hold anything, and the admin form renders these straight into option labels.
      *
-     * @param string $serviceCode
-     * @return array<string,string>|null Map of model value => label, or null when nothing is stored
+     * @param mixed $raw
+     * @return array<string,string>|null
      */
-    public function getModels(string $serviceCode): ?array
+    private function validatedModels(mixed $raw): ?array
     {
-        $payload = $this->getPayload($serviceCode);
-        $models = $payload[self::KEY_MODELS] ?? null;
+        $models = $this->decode($raw)[self::KEY_MODELS] ?? null;
         if (!is_array($models)) {
             return null;
         }
@@ -97,28 +166,13 @@ class Storage
     }
 
     /**
-     * Unix timestamp of the last refresh for a service code.
+     * Defensively decode a stored payload.
      *
-     * @param string $serviceCode
-     * @return int|null Null when nothing is stored
-     */
-    public function getFetchedAt(string $serviceCode): ?int
-    {
-        $payload = $this->getPayload($serviceCode);
-        $fetchedAt = $payload[self::KEY_FETCHED_AT] ?? null;
-
-        return is_numeric($fetchedAt) ? (int) $fetchedAt : null;
-    }
-
-    /**
-     * Read and defensively decode the stored payload for a service code.
-     *
-     * @param string $serviceCode
+     * @param mixed $raw
      * @return array<array-key,mixed>|null
      */
-    private function getPayload(string $serviceCode): ?array
+    private function decode(mixed $raw): ?array
     {
-        $raw = $this->scopeConfig->getValue(self::CONFIG_PATH_PREFIX . $serviceCode);
         if (!is_string($raw) || $raw === '') {
             return null;
         }

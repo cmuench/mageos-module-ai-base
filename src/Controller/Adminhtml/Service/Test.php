@@ -12,10 +12,17 @@ use Magento\Framework\Controller\Result\JsonFactory;
 use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\Api\AiClientFactoryInterface;
 use MageOS\AiBase\Api\AiClientInterface;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\FailureReporter;
+use MageOS\AiBase\Model\ServiceScope;
 
 /**
  * Tests connectivity of a configured AI service by sending a minimal prompt.
+ *
+ * Acts on the scope the config page is showing: the form sends that page's `website` or `store`
+ * parameter along and the client is built from the row as stored at that scope. Without it, a row
+ * that only exists on a website could not be tested at all, and one a website overrides was tested
+ * with default's credentials.
  *
  * Extends Backend\App\Action so admin authentication, form-key validation and
  * ACL enforcement (via ADMIN_RESOURCE) apply through the standard plugins.
@@ -42,12 +49,16 @@ class Test extends Action implements HttpPostActionInterface
      * @param JsonFactory $jsonFactory
      * @param AiClientFactoryInterface $clientFactory
      * @param FailureReporter $failureReporter Logs a failure in full and decides what the page shows
+     * @param ConfigScopeResolver $scopeResolver Reads the scope the config page sent along
+     * @param ServiceScope $serviceScope Makes the client factory's selector read the rows of that scope
      */
     public function __construct(
         Context $context,
         private readonly JsonFactory $jsonFactory,
         private readonly AiClientFactoryInterface $clientFactory,
         private readonly FailureReporter $failureReporter,
+        private readonly ConfigScopeResolver $scopeResolver,
+        private readonly ServiceScope $serviceScope,
     ) {
         parent::__construct($context);
     }
@@ -100,6 +111,9 @@ class Test extends Action implements HttpPostActionInterface
      * otherwise test the first row's credentials from the second row's button and be told the key
      * they are looking at works. The code remains as a fallback for a caller that has only that.
      *
+     * Only building the client happens inside the scope: a built client already holds the row's
+     * credentials and endpoint, so the call itself does not need the scope held open.
+     *
      * @param string $serviceId
      * @param string $serviceCode
      * @return AiClientInterface
@@ -107,9 +121,12 @@ class Test extends Action implements HttpPostActionInterface
      */
     private function resolveClient(string $serviceId, string $serviceCode): AiClientInterface
     {
-        return $serviceId !== ''
-            ? $this->clientFactory->createById($serviceId)
-            : $this->clientFactory->create($serviceCode);
+        return $this->serviceScope->run(
+            $this->scopeResolver->fromRequest($this->getRequest()),
+            fn (): AiClientInterface => $serviceId !== ''
+                ? $this->clientFactory->createById($serviceId)
+                : $this->clientFactory->create($serviceCode),
+        );
     }
 
     /**

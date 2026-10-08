@@ -148,8 +148,15 @@ $_isReadOnly = $block->isReadOnly();
             </tbody>
         </table>
     </div>
+    <?php
+    // Posted even when no row is, so deleting the last service still reaches the save. On its own
+    // it no longer means "store an empty list": the backend model only accepts it together with the
+    // marker the script below adds once every stored row is rendered. See
+    // EncryptedServices::RENDERED_MARKER for the data loss that guards against.
+    ?>
     <input type="hidden"
-           name="<?= $escaper->escapeHtmlAttr($block->getElement()->getName()) ?>[__empty]"
+           name="<?= $escaper->escapeHtmlAttr($block->getElement()->getName()) ?>[<?=
+               $escaper->escapeHtmlAttr(\MageOS\AiBase\Model\Config\Backend\EncryptedServices::EMPTY_MARKER) ?>]"
            value=""/>
 
     <?php
@@ -174,36 +181,46 @@ $_isReadOnly = $block->isReadOnly();
     // The rows themselves stay, and so do the two actions that read stored configuration rather
     // than change it, since they are the only way to check what a locked install is actually using.
     $readOnlyJs = $_isReadOnly ? 'true' : 'false';
-    // Test Connection is only rendered for SAVED rows: the client factory reads
-    // saved configuration, so unsaved rows cannot be tested. When multiple rows
-    // share a service code, the factory uses the FIRST configured row of that
-    // code, so results are effectively per-code, not per-row.
+    // Test Connection is only rendered for SAVED rows: the client factory reads saved configuration,
+    // so unsaved rows cannot be tested. The button sends its row id and the page's scope parameters,
+    // so it tests that row as stored at the scope on screen.
     $testUrlJs = $escaper->escapeJs($block->getUrl('mageos_ai/service/test'));
     $testLabelJs = $escaper->escapeJs(__('Test Connection'));
     $testingLabelJs = $escaper->escapeJs(__('Testing...'));
-    // Refresh Models mirrors Test Connection: saved rows only, first configured row per
-    // code; the button is rendered only for services whose schema opts in.
+    // Refresh Models mirrors Test Connection: saved rows only, addressed by row id and scope. The
+    // fetched list is stored for that row, since it belongs to the endpoint the row points at. The
+    // button is rendered only for services whose schema opts in.
     $refreshUrlJs = $escaper->escapeJs($block->getUrl('mageos_ai/service/refreshmodels'));
     $refreshLabelJs = $escaper->escapeJs(__('Refresh Models'));
     $refreshingLabelJs = $escaper->escapeJs(__('Refreshing...'));
     $modelsLabelJs = $escaper->escapeJs(__('models'));
+    // Every value placed in the script goes through encodeForScript() or escapeJs(). A stored value
+    // or a provider's model name containing "<!--<script>" otherwise switched the HTML parser into a
+    // state where it swallowed the closing tag, so the script never ran and no row rendered.
     $existingRowsJs = '';
-    foreach ($block->getArrayRows() as $_row) {
-        $rowData = $_row->getData();
-        $serviceCode = array_key_first($rowData);
+    foreach ($block->getStoredRows() as $_row) {
         $existingRowsJs .= sprintf(
-            "    addRow('%s', %s, '%s');\n",
-            $escaper->escapeJs($serviceCode),
-            json_encode($rowData[$serviceCode]),
-            $escaper->escapeJs((string) $_row->getData('_id'))
+            "    addRow('%s', %s, '%s', %s);\n",
+            $escaper->escapeJs($_row['code']),
+            $block->encodeForScript($_row['values']),
+            $escaper->escapeJs($_row['id']),
+            $_row['modelOptions'] === null ? 'null' : $block->encodeForScript($_row['modelOptions'])
         );
     }
+    $scopeParamsJson = $block->getScopeParamsJson();
+    // Ticked "Use Default" / "Use Website": the controls start disabled, as core renders an inherited
+    // field, and Magento's toggleValueElements() enables them when the box is unticked.
+    $inheritedJs = $block->isInherited() ? 'true' : 'false';
+    $inheritCheckboxIdJs = $escaper->escapeJs($block->getElement()->getHtmlId() . '_inherit');
+    $renderedMarkerJs = $escaper->escapeJs(\MageOS\AiBase\Model\Config\Backend\EncryptedServices::RENDERED_MARKER);
     $scriptString = <<<script
 require(['prototype'], function () {
     const schema = {$schemaJson};
     const fieldNameBase = '{$fieldNameJs}';
     const readOnly = {$readOnlyJs};
     const disabledAttr = readOnly ? ' disabled' : '';
+    const scopeParams = {$scopeParamsJson};
+    const inheritedOnLoad = {$inheritedJs};
 
     function escapeHtml(value) {
         if (value === null || value === undefined) return '';
@@ -290,10 +307,24 @@ require(['prototype'], function () {
         };
     }
 
-    function addRow(serviceCode, values, existingRowId) {
+    /**
+     * A field descriptor with the row's own model list in place of the provider-wide one.
+     *
+     * A refreshed list belongs to the endpoint a row points at, so two rows of one provider on
+     * different hosts each get theirs. Rows added in this page view have none yet (null), and keep
+     * the schema's list.
+     */
+    function withRowModelOptions(field, modelOptions) {
+        if (field.name !== 'model' || !Array.isArray(modelOptions)) return field;
+        return Object.assign({}, field, { options: modelOptions });
+    }
+
+    function addRow(serviceCode, values, existingRowId, modelOptions) {
         const serviceSchema = schema[serviceCode];
         if (!serviceSchema) return;
-        const fields = serviceSchema.fields;
+        const fields = serviceSchema.fields.map(function (schemaField) {
+            return withRowModelOptions(schemaField, modelOptions);
+        });
 
         const d = new Date();
         const rowId = existingRowId || ('_' + d.getTime() + '_' + d.getMilliseconds());
@@ -534,8 +565,54 @@ require(['prototype'], function () {
         }
     }
 
+    /**
+     * Whether the "Use Default" / "Use Website" box is ticked right now. While it is, Magento saves
+     * nothing for this field at this scope, so a row added then would vanish on save.
+     */
+    function isInherited() {
+        const checkbox = document.getElementById('{$inheritCheckboxIdJs}');
+        return Boolean(checkbox && checkbox.checked);
+    }
+
+    /**
+     * Render the controls disabled, the way Magento renders an inherited field server side. Its
+     * toggleValueElements() flips every non-hidden control in this cell when the box changes, which
+     * covers these controls too once they exist.
+     */
+    function disableForInheritance() {
+        const container = document.querySelector('.ai-services-configurator');
+        if (!container) return;
+        container.querySelectorAll('input, select, textarea, button').forEach(function (el) {
+            if (el.type === 'hidden') return;
+            el.disabled = true;
+            el.classList.add('disabled');
+        });
+    }
+
+    /**
+     * Tell the backend model the form is complete. It is the last thing this script does, after every
+     * stored row is rendered, so a script that fails anywhere before it leaves the marker out and the
+     * save is refused instead of storing only the rows that happened to render.
+     */
+    function markRendered() {
+        const container = document.querySelector('.ai-services-configurator');
+        if (!container) return;
+        const marker = document.createElement('input');
+        marker.type = 'hidden';
+        marker.name = fieldNameBase + '[{$renderedMarkerJs}]';
+        marker.value = '1';
+        container.appendChild(marker);
+    }
+
+    function appendScopeParams(body) {
+        Object.keys(scopeParams).forEach(function (key) {
+            body.append(key, scopeParams[key]);
+        });
+    }
+
     document.querySelectorAll('.ai-services-configurator .add-ai-service').forEach(function (btn) {
         btn.addEventListener('click', function (e) {
+            if (isInherited()) return;
             const trigger = e.target.closest('.add-ai-service');
             const rowId = addRow(trigger.dataset.aiService);
             updateEmptyState();
@@ -576,6 +653,7 @@ require(['prototype'], function () {
         body.append('service_id', button.dataset.rowId);
         body.append('service_code', button.dataset.serviceCode);
         body.append('form_key', window.FORM_KEY);
+        appendScopeParams(body);
 
         fetch('{$testUrlJs}', { method: 'POST', body: body })
             .then(function (response) { return response.json(); })
@@ -666,6 +744,7 @@ require(['prototype'], function () {
         body.append('service_id', button.dataset.rowId);
         body.append('service_code', button.dataset.serviceCode);
         body.append('form_key', window.FORM_KEY);
+        appendScopeParams(body);
 
         fetch('{$refreshUrlJs}', { method: 'POST', body: body })
             .then(function (response) { return response.json(); })
@@ -759,6 +838,8 @@ require(['prototype'], function () {
 
 {$existingRowsJs}
     updateEmptyState();
+    if (inheritedOnLoad) disableForInheritance();
+    markRendered();
 });
 script;
     ?>

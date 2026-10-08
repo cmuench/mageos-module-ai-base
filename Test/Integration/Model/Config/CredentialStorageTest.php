@@ -10,6 +10,7 @@ use Magento\Config\Model\Config\Structure\Element\Field;
 use Magento\Framework\App\Config as AppConfig;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Config\Storage\WriterInterface;
+use Magento\Framework\Exception\ValidatorException;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\TestFramework\Fixture\AppArea;
 use Magento\TestFramework\Helper\Bootstrap;
@@ -172,9 +173,45 @@ final class CredentialStorageTest extends TestCase
     }
 
     /**
+     * A complete form post carries both markers; neither may end up stored as if it were a row.
+     */
+    public function test_a_fully_rendered_form_post_is_saved_without_its_markers(): void
+    {
+        $this->saveServices([
+            EncryptedServices::EMPTY_MARKER => '',
+            EncryptedServices::RENDERED_MARKER => '1',
+            '_row1' => ['openai' => ['api_key' => self::API_KEY, 'model' => 'gpt-4o']],
+        ]);
+
+        $stored = json_decode($this->storedValue(), true);
+        self::assertSame(['_row1'], array_keys($stored));
+    }
+
+    /**
+     * The form's script failed before it rendered the stored rows, so the post carries only the
+     * server-rendered empty marker. Saving that used to delete every service and credential.
+     */
+    public function test_a_form_post_from_a_form_that_did_not_finish_rendering_keeps_what_is_stored(): void
+    {
+        $this->saveServices([
+            '_row1' => ['openai' => ['api_key' => self::API_KEY, 'model' => 'gpt-4o']],
+        ]);
+        $before = $this->storedValue();
+
+        try {
+            $this->saveServices([EncryptedServices::EMPTY_MARKER => '']);
+            self::fail('A post from a form that did not finish rendering was accepted.');
+        } catch (ValidatorException) {
+        }
+
+        $this->objectManager->get(AppConfig::class)->clean();
+        self::assertSame($before, $this->storedValue());
+    }
+
+    /**
      * Save a services configuration the way the admin form posts it.
      *
-     * @param array<string, array<string, array<string, string>>> $rows
+     * @param array<string, string|array<string, array<string, string>>> $rows
      * @return void
      */
     private function saveServices(array $rows): void

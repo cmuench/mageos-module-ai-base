@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Test\Unit\Controller\Adminhtml\Service;
 
 require_once __DIR__ . '/../../../Stubs/RecordingLogger.php';
+require_once __DIR__ . '/../../../Stubs/FixedConfigScopeResolver.php';
 
 use Magento\Backend\App\Action\Context;
 use Magento\Framework\App\RequestInterface;
@@ -16,9 +17,13 @@ use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Controller\Adminhtml\Service\RefreshModels;
+use MageOS\AiBase\Model\Config\ConfigScope;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\FailureReporter;
 use MageOS\AiBase\Model\ModelList\Storage;
 use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\ServiceScope;
+use MageOS\AiBase\Test\Unit\Stubs\FixedConfigScopeResolver;
 use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -37,6 +42,7 @@ final class RefreshModelsTest extends TestCase
     private Storage&MockObject $storage;
     private OpenAi&MockObject $openAi;
     private RecordingLogger $logger;
+    private ServiceScope $serviceScope;
 
     /**
      * @var array<string, mixed>|null
@@ -56,15 +62,17 @@ final class RefreshModelsTest extends TestCase
         $this->openAi = $this->createMock(OpenAi::class);
         $this->openAi->method('getCode')->willReturn('openai');
         $this->logger = new RecordingLogger();
+        $this->serviceScope = new ServiceScope();
     }
 
     /**
      * Build the controller under test with the given registered service definitions.
      *
      * @param AiServiceConfigurationInterface[] $services
+     * @param ConfigScopeResolver|null $scopeResolver The scope the config page sent; default when null
      * @return RefreshModels
      */
-    private function createSubject(array $services): RefreshModels
+    private function createSubject(array $services, ?ConfigScopeResolver $scopeResolver = null): RefreshModels
     {
         $context = $this->createMock(Context::class);
         $context->method('getRequest')->willReturn($this->request);
@@ -84,6 +92,8 @@ final class RefreshModelsTest extends TestCase
             $this->storage,
             new ServiceRegistry($services),
             new FailureReporter($this->logger),
+            $scopeResolver ?? FixedConfigScopeResolver::atDefault(),
+            $this->serviceScope,
         );
     }
 
@@ -115,7 +125,7 @@ final class RefreshModelsTest extends TestCase
         $azure = $this->createMock(AiServiceConfigurationInterface::class);
         $azure->method('getCode')->willReturn('azure');
         $this->serviceSelector->expects(self::never())->method('getByCode');
-        $this->storage->expects(self::never())->method('save');
+        $this->storage->expects(self::never())->method('saveForRow');
 
         $this->createSubject([$azure])->execute();
 
@@ -127,7 +137,7 @@ final class RefreshModelsTest extends TestCase
     {
         $this->stubParams(['service_code' => 'openai']);
         $this->serviceSelector->method('getByCode')->with('openai')->willReturn([]);
-        $this->storage->expects(self::never())->method('save');
+        $this->storage->expects(self::never())->method('saveForRow');
 
         $this->createSubject([$this->openAi])->execute();
 
@@ -140,6 +150,7 @@ final class RefreshModelsTest extends TestCase
         $this->stubParams(['service_code' => 'openai']);
 
         $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getId')->willReturn('_first_openai_row');
         $configured->method('getConfiguration')->willReturn(['api_key' => 'sk-test', 'model' => 'gpt-4o']);
         $this->serviceSelector->method('getByCode')->with('openai')->willReturn([$configured]);
 
@@ -147,7 +158,8 @@ final class RefreshModelsTest extends TestCase
         $this->openAi->expects(self::once())->method('fetchModels')
             ->with(['api_key' => 'sk-test', 'model' => 'gpt-4o'])
             ->willReturn($models);
-        $this->storage->expects(self::once())->method('save')->with('openai', $models);
+        $this->storage->expects(self::once())->method('saveForRow')
+            ->with('_first_openai_row', $models, self::isInstanceOf(ConfigScope::class));
 
         $this->createSubject([$this->openAi])->execute();
 
@@ -166,7 +178,7 @@ final class RefreshModelsTest extends TestCase
 
         $this->openAi->method('fetchModels')
             ->willThrowException(new LocalizedException(__('Request to %1 returned HTTP status %2.', 'x', 401)));
-        $this->storage->expects(self::never())->method('save');
+        $this->storage->expects(self::never())->method('saveForRow');
 
         $this->createSubject([$this->openAi])->execute();
 
@@ -223,5 +235,64 @@ final class RefreshModelsTest extends TestCase
         $this->createSubject([$this->openAi])->execute();
 
         self::assertTrue($this->resultData['success']);
+    }
+
+    /**
+     * Two rows of one provider pointing at different hosts serve different models, so the list is
+     * stored for the row whose button was pressed, not for the provider code.
+     */
+    public function test_execute_stores_the_list_for_the_row_it_was_fetched_for(): void
+    {
+        $this->stubParams(['service_id' => '_ollama_host_b', 'service_code' => 'openai']);
+        $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getId')->willReturn('_ollama_host_b');
+        $configured->method('getConfiguration')->willReturn([]);
+        $this->serviceSelector->method('getById')->willReturn($configured);
+        $this->openAi->method('fetchModels')->willReturn(['qwen3' => 'qwen3']);
+        $stored = [];
+        $this->storage->method('saveForRow')->willReturnCallback(
+            static function (string $rowId, array $models) use (&$stored): void {
+                $stored[$rowId] = $models;
+            }
+        );
+
+        $this->createSubject([$this->openAi])->execute();
+
+        self::assertSame(['_ollama_host_b' => ['qwen3' => 'qwen3']], $stored);
+    }
+
+    /**
+     * On a website's config page the row is read, and its list stored, at that website: a row that
+     * only exists there must be found, and one the website overrides must use its own credentials.
+     */
+    public function test_execute_reads_the_row_and_stores_its_list_at_the_scope_of_the_config_page(): void
+    {
+        $this->stubParams(['service_id' => '_website_row', 'service_code' => 'openai']);
+        $website = new ConfigScope('websites', 2, 'second');
+        $scopeWhileReading = null;
+        $configured = $this->createMock(AiServiceInterface::class);
+        $configured->method('getId')->willReturn('_website_row');
+        $configured->method('getConfiguration')->willReturn([]);
+        $this->serviceSelector->method('getById')->willReturnCallback(
+            function () use (&$scopeWhileReading, $configured) {
+                $scopeWhileReading = $this->serviceScope->getCurrent();
+
+                return $configured;
+            }
+        );
+        $this->openAi->method('fetchModels')->willReturn([]);
+        $storedAt = null;
+        $this->storage->method('saveForRow')->willReturnCallback(
+            static function (string $rowId, array $models, ConfigScope $scope) use (&$storedAt): void {
+                $storedAt = $scope;
+            }
+        );
+
+        $this->createSubject([$this->openAi], new FixedConfigScopeResolver($website))->execute();
+
+        self::assertTrue($this->resultData['success']);
+        self::assertSame($website, $scopeWhileReading);
+        self::assertSame($website, $storedAt);
+        self::assertNull($this->serviceScope->getCurrent());
     }
 }

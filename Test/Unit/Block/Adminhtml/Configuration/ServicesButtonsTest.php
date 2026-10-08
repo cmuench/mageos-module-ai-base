@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Test\Unit\Block\Adminhtml\Configuration;
 
 use Magento\Config\Block\System\Config\Form\Field\FieldArray\AbstractFieldArray;
-use Magento\Framework\Serialize\Serializer\Json;
 use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Block\Adminhtml\Configuration\Services;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
@@ -129,7 +128,6 @@ final class ServicesButtonsTest extends TestCase
         $reflection = new \ReflectionClass(Services::class);
         $block = $reflection->newInstanceWithoutConstructor();
 
-        $reflection->getProperty('jsonSerializer')->setValue($block, new Json());
         $reflection->getProperty('serviceRegistry')->setValue($block, new ServiceRegistry(array_map(
             fn (string $code): AiServiceConfigurationInterface => $this->serviceFor($code),
             $codes
@@ -207,7 +205,6 @@ final class ServicesButtonsTest extends TestCase
         $reflection = new \ReflectionClass(Services::class);
         $block = $reflection->newInstanceWithoutConstructor();
 
-        $reflection->getProperty('jsonSerializer')->setValue($block, new Json());
         $reflection->getProperty('serviceRegistry')->setValue($block, new ServiceRegistry([$service]));
         $reflection->getProperty('modelListResolver')->setValue($block, $this->modelListResolver);
         $reflection->getProperty('bridgeRegistry')->setValue($block, $this->bridgeRegistry);

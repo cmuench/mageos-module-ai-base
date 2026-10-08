@@ -117,7 +117,8 @@ Console/Command/
 
 ### Read path (database → consumers)
 
-`AiServiceSelector::getAll()/getByCode()/getById()` reads the path with store scope,
+`AiServiceSelector::getAll()/getByCode()/getById()` reads the path with store scope (or, inside
+`Model\ServiceScope::run()`, at the scope an admin action established; see below),
 defensively parses (non-string raw, malformed JSON, malformed rows, non-string codes are all
 skipped, never thrown), decrypts flagged fields via `SensitiveDataProcessor`, and wraps each
 row in an `AiServiceInterface`. Consumers always receive plaintext values.
@@ -183,14 +184,26 @@ provider's wording. `streamChat()` yields chunks and then *returns* the assemble
 `ChatResponseInterface`, because the platform lifts final token counts and the stop reason out of
 the delta sequence into result metadata — a client only watching deltas would report neither.
 
+### Admin actions and the edited scope
+
+The config page addresses its scope as `website/<id>` or `store/<id>`. The form sends those
+parameters with Test Connection and Refresh Models, `Model\Config\ConfigScopeResolver` turns them
+into a `ConfigScope`, and the controller resolves the row inside `Model\ServiceScope::run()`, which
+makes `AiServiceSelector` read that scope instead of the ambient one. The `ConfiguredService`
+option source does the same with the config page's own request. An emulation rather than a scope
+argument, because `AiServiceSelectorInterface` is `@api` and Test Connection should keep building
+its client through `AiClientFactoryInterface`; Magento's store emulation cannot express a website.
+
 ### Model refresh path (manual only)
 
 Admin clicks Refresh Models → `RefreshModels` controller → the service's `fetchModels()`
-(via `HttpFetcher`, Magento's HTTP client) → `Storage::save()` at
-`mageos_ai/services/models/<code>` (which also cleans the config cache so the change is
-live immediately) → response updates the form select in place.
-`Resolver` is the single merge point: stored list if present, else the curated
-`getSupportedModels()`. There is intentionally no cron/automatic fetching: no background
+(via `HttpFetcher`, Magento's HTTP client) → `Storage::saveForRow()` at
+`mageos_ai/services/row_models/<row id>`, at the edited scope (which also cleans the config cache
+so the change is live immediately) → response updates that row's model field in place.
+Lists are per row because they belong to the endpoint a row points at: two Ollama rows on
+different hosts serve different models. `Resolver` is the single merge point: the row's stored
+list if present, else a list stored per code by versions before this (`mageos_ai/services/models/<code>`,
+read only), else the curated `getSupportedModels()`. There is intentionally no cron/automatic fetching: no background
 HTTP with credentials, no cache-invalidation policy, and the admin sees exactly when and
 why a list changed.
 
@@ -290,7 +303,8 @@ not retention of what was already recorded.
 | Path | Content |
 |---|---|
 | `mageos_ai/services/configuration` | JSON `{rowId: {serviceCode: {field: value}}}`; flagged fields encrypted |
-| `mageos_ai/services/models/<code>` | JSON `{models: {value: label}, fetched_at: <ts>}` from the last manual refresh |
+| `mageos_ai/services/row_models/<row id>` | JSON `{models: {value: label}, fetched_at: <ts>}` from the last manual refresh of that row, at the scope it was refreshed in (row ids that are not a safe path segment are sha1-hashed) |
+| `mageos_ai/services/models/<code>` | Same payload, per provider code, written by versions before lists became per row; read as a fallback only |
 | `mageos_ai_usage_log` table | One row per call the client actually sent: succeeded, failed after reaching the provider, or succeeded reporting no usage. Never for a call `AiRequestNotSentException` rejected before it reached the provider. Columns: service id/code, model, consumer, store id, six independently-nullable token counts (prompt, completion, total, cache read, cache write, reasoning), whether it streamed, whether it failed, `created_at`. Counts and metadata only, see the decision record below |
 | `mageos_ai_usage_daily` table | One row per (`usage_date`, service id, model, consumer, store id) grouping key per day, written by the roll-up cron; `usage_date` is a calendar date in the reporting timezone (Default Config's), not `DATE(created_at)`. Carries the same six token counts plus `calls` and `failed_calls` |
 

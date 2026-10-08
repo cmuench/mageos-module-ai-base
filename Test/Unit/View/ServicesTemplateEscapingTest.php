@@ -144,6 +144,100 @@ final class ServicesTemplateEscapingTest extends TestCase
     }
 
     /**
+     * Every value interpolated into the inline script has to be one the HTML parser cannot react to.
+     *
+     * A stored value or a provider's model name containing `<!--<script>` once switched the parser
+     * into the script-data double-escaped state, the real `</script>` was swallowed, the script did
+     * not run and no row rendered; the next save then stored an empty list. So each `{$var}` in the
+     * script must come from escapeJs(), from the block's encodeForScript() (directly or through the
+     * two methods that use it), or be a literal boolean.
+     */
+    public function test_every_value_interpolated_into_the_script_is_encoded_for_it(): void
+    {
+        preg_match('/<<<script\n(.*?)\nscript;/s', $this->template, $script);
+        self::assertArrayHasKey(1, $script, 'Inline script heredoc not found in the template.');
+        preg_match_all('/\{\$(\w+)\}/', $script[1], $variables);
+        self::assertNotSame([], $variables[1], 'No interpolation found; this guard now checks nothing.');
+
+        $unsafe = array_values(array_filter(
+            array_unique($variables[1]),
+            fn (string $variable): bool => !$this->isEncodedForScript($variable)
+        ));
+
+        self::assertSame([], $unsafe, 'Interpolated into the script without escapeJs()/encodeForScript(): '
+            . implode(', ', $unsafe));
+    }
+
+    public function test_no_value_reaches_the_script_through_plain_json_encode(): void
+    {
+        self::assertStringNotContainsString(
+            'json_encode(',
+            $this->template,
+            'Plain json_encode() leaves "<" in place; use $block->encodeForScript().'
+        );
+    }
+
+    /**
+     * The stored rows are where a hostile value lives, so pin that each part of their addRow() call
+     * goes through an encoder rather than relying on the generic check above to find the sprintf.
+     */
+    public function test_stored_rows_are_encoded_into_their_add_row_calls(): void
+    {
+        preg_match('/foreach \(\$block->getStoredRows\(\) as \$_row\) \{(.*?)\n    \}/s', $this->template, $loop);
+        self::assertArrayHasKey(1, $loop, 'The stored-row loop is gone; this guard now checks nothing.');
+
+        self::assertStringContainsString("encodeForScript(\$_row['values'])", $loop[1]);
+        self::assertStringContainsString("encodeForScript(\$_row['modelOptions'])", $loop[1]);
+        self::assertStringContainsString("escapeJs(\$_row['code'])", $loop[1]);
+        self::assertStringContainsString("escapeJs(\$_row['id'])", $loop[1]);
+    }
+
+    /**
+     * The backend model only accepts the server-rendered empty marker together with the one the
+     * script adds once every stored row is on the page. Adding it any earlier, or anywhere but as
+     * the last step, would let a script that failed halfway save only the rows it managed to render.
+     */
+    public function test_the_rendered_marker_is_added_only_after_every_stored_row_is_rendered(): void
+    {
+        $rowsAt = strpos($this->template, '{$existingRowsJs}');
+        $markerAt = strrpos($this->template, 'markRendered();');
+
+        self::assertIsInt($rowsAt);
+        self::assertIsInt($markerAt);
+        self::assertGreaterThan($rowsAt, $markerAt);
+        self::assertMatchesRegularExpression('/markRendered\(\);\n\}\);\nscript;/', $this->template);
+        self::assertSame(1, substr_count($this->template, 'markRendered();'));
+    }
+
+    public function test_the_empty_marker_is_still_rendered_server_side(): void
+    {
+        self::assertStringContainsString('EncryptedServices::EMPTY_MARKER', $this->template);
+        self::assertStringContainsString('EncryptedServices::RENDERED_MARKER', $this->template);
+    }
+
+    /**
+     * Whether a template variable is assigned only from something that encodes it for the script.
+     */
+    private function isEncodedForScript(string $variable): bool
+    {
+        if ($variable === 'existingRowsJs') {
+            return true;
+        }
+        if (preg_match('/\$' . $variable . ' = (.*?);\n/s', $this->template, $assignment) !== 1) {
+            return false;
+        }
+
+        foreach (['escapeJs(', 'encodeForScript(', 'getServicesSchemaJson()', 'getScopeParamsJson()'] as $encoder) {
+            if (str_starts_with(trim($assignment[1]), '$escaper->' . $encoder)
+                || str_starts_with(trim($assignment[1]), '$block->' . $encoder)) {
+                return true;
+            }
+        }
+
+        return preg_match('/^\$(_\w+|block->\w+\(\)) \? \'true\' : \'false\'$/', trim($assignment[1])) === 1;
+    }
+
+    /**
      * @return array<int, string>
      */
     private function linesContainingRowId(): array

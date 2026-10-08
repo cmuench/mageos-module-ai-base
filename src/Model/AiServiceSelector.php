@@ -13,7 +13,11 @@ use MageOS\AiBase\Model\Config\SensitiveDataProcessor;
 
 class AiServiceSelector implements AiServiceSelectorInterface
 {
-    private const CONFIG_PATH_AI_SERVICES = 'mageos_ai/services/configuration';
+    /**
+     * Where the admin form stores the configured rows; also the path the form checks for a
+     * deployment-configuration lock.
+     */
+    public const CONFIG_PATH_AI_SERVICES = 'mageos_ai/services/configuration';
 
     /**
      * Raw stored value the memoized services were parsed from.
@@ -33,11 +37,13 @@ class AiServiceSelector implements AiServiceSelectorInterface
      * @param ScopeConfigInterface $scopeConfig
      * @param AiServiceInterfaceFactory $aiServiceFactory
      * @param SensitiveDataProcessor $sensitiveDataProcessor
+     * @param ServiceScope $serviceScope Set by admin actions that act on the scope being edited
      */
     public function __construct(
         private readonly ScopeConfigInterface $scopeConfig,
         private readonly AiServiceInterfaceFactory $aiServiceFactory,
         private readonly SensitiveDataProcessor $sensitiveDataProcessor,
+        private readonly ServiceScope $serviceScope,
     ) {
     }
 
@@ -83,13 +89,13 @@ class AiServiceSelector implements AiServiceSelectorInterface
      * service once per iteration would otherwise pay for on every turn. The memo is keyed on the
      * raw stored value rather than simply held: reading it back is cheap, and a store switch
      * (emulation in cron or a transactional email) has to re-parse rather than serve another
-     * scope's credentials.
+     * scope's credentials. The same holds for an admin action switching {@see ServiceScope}.
      *
      * @return list<AiServiceInterface>
      */
     private function getParsedConfig(): array
     {
-        $raw = $this->scopeConfig->getValue(self::CONFIG_PATH_AI_SERVICES, ScopeInterface::SCOPE_STORE);
+        $raw = $this->readStoredValue();
         if (!is_string($raw) || $raw === '') {
             return [];
         }
@@ -130,5 +136,23 @@ class AiServiceSelector implements AiServiceSelectorInterface
         $this->parsedRaw = $raw;
 
         return $this->parsedServices = $services;
+    }
+
+    /**
+     * The raw stored rows, at the scope an admin action established or else at ambient store scope.
+     *
+     * Ambient store scope is what the public interface promises every other caller, so it stays the
+     * answer whenever nothing set a scope explicitly.
+     *
+     * @return mixed
+     */
+    private function readStoredValue(): mixed
+    {
+        $scope = $this->serviceScope->getCurrent();
+        if ($scope === null) {
+            return $this->scopeConfig->getValue(self::CONFIG_PATH_AI_SERVICES, ScopeInterface::SCOPE_STORE);
+        }
+
+        return $this->scopeConfig->getValue(self::CONFIG_PATH_AI_SERVICES, $scope->getType(), $scope->getCode());
     }
 }

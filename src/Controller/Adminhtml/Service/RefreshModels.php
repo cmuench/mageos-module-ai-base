@@ -12,12 +12,20 @@ use Magento\Framework\Controller\Result\JsonFactory;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
+use MageOS\AiBase\Model\Config\ConfigScope;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\FailureReporter;
 use MageOS\AiBase\Model\ModelList\Storage;
 use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\ServiceScope;
 
 /**
  * Live-fetches the model list of a configured AI service and persists it for the admin form.
+ *
+ * Acts on the scope the config page is showing: the form sends that page's `website` or `store`
+ * parameter along, the row is read at that scope, and the list is stored for that row at that
+ * scope. Without it, refreshing a row that only exists on a website reported it missing, and a row
+ * a website overrides was fetched with default's credentials.
  *
  * Extends Backend\App\Action so admin authentication, form-key validation and
  * ACL enforcement (via ADMIN_RESOURCE) apply through the standard plugins.
@@ -36,6 +44,8 @@ class RefreshModels extends Action implements HttpPostActionInterface
      * @param Storage $modelListStorage
      * @param ServiceRegistry $serviceRegistry Registered backends, the same set the admin form gets
      * @param FailureReporter $failureReporter Logs a failure in full and decides what the page shows
+     * @param ConfigScopeResolver $scopeResolver Reads the scope the config page sent along
+     * @param ServiceScope $serviceScope Makes the selector read the rows of that scope
      */
     public function __construct(
         Context $context,
@@ -44,12 +54,14 @@ class RefreshModels extends Action implements HttpPostActionInterface
         private readonly Storage $modelListStorage,
         private readonly ServiceRegistry $serviceRegistry,
         private readonly FailureReporter $failureReporter,
+        private readonly ConfigScopeResolver $scopeResolver,
+        private readonly ServiceScope $serviceScope,
     ) {
         parent::__construct($context);
     }
 
     /**
-     * Refresh the model list for the requested service code and report the outcome as JSON.
+     * Refresh the model list for the requested row and report the outcome as JSON.
      *
      * @return Json
      */
@@ -73,7 +85,8 @@ class RefreshModels extends Action implements HttpPostActionInterface
                 ]);
             }
 
-            $configured = $this->resolveRow($this->getRequestedParam('service_id'), $serviceCode);
+            $scope = $this->scopeResolver->fromRequest($this->getRequest());
+            $configured = $this->resolveRow($this->getRequestedParam('service_id'), $serviceCode, $scope);
             if ($configured === null) {
                 return $result->setData([
                     'success' => false,
@@ -82,7 +95,7 @@ class RefreshModels extends Action implements HttpPostActionInterface
             }
 
             $models = $definition->fetchModels($configured->getConfiguration());
-            $this->modelListStorage->save($serviceCode, $models);
+            $this->modelListStorage->saveForRow($configured->getId(), $models, $scope);
 
             return $result->setData([
                 'success' => true,
@@ -102,24 +115,26 @@ class RefreshModels extends Action implements HttpPostActionInterface
     }
 
     /**
-     * The configured row whose credentials the list is fetched with.
+     * The configured row whose credentials the list is fetched with, read at the edited scope.
      *
-     * Model lists are per provider, but the key that fetches one belongs to a row. An administrator
-     * with two rows of the same provider, which is the setup row ids exist for, would otherwise
-     * refresh from the first row's account no matter which button they pressed, and read the
-     * resulting error against the key in front of them.
+     * Both the key that fetches a list and the endpoint it comes from belong to a row. An
+     * administrator with two rows of the same provider, which is the setup row ids exist for, would
+     * otherwise refresh from the first row's account no matter which button they pressed, and read
+     * the resulting error against the key in front of them.
      *
      * @param string $serviceId
      * @param string $serviceCode
+     * @param ConfigScope $scope
      * @return AiServiceInterface|null
      */
-    private function resolveRow(string $serviceId, string $serviceCode): ?AiServiceInterface
+    private function resolveRow(string $serviceId, string $serviceCode, ConfigScope $scope): ?AiServiceInterface
     {
-        if ($serviceId !== '') {
-            return $this->serviceSelector->getById($serviceId);
-        }
-
-        return $this->serviceSelector->getByCode($serviceCode)[0] ?? null;
+        return $this->serviceScope->run(
+            $scope,
+            fn (): ?AiServiceInterface => $serviceId !== ''
+                ? $this->serviceSelector->getById($serviceId)
+                : ($this->serviceSelector->getByCode($serviceCode)[0] ?? null),
+        );
     }
 
     /**
