@@ -82,13 +82,6 @@ jobs:
           docker exec store ./retry "php bin/magento module:enable MageOS_AiBase"
           docker exec store ./retry "php bin/magento setup:upgrade --no-interaction --keep-generated"
 
-      # symfony/ai-platform is a suggest, so nothing installs it for us. Two bridges are enough to
-      # give the form both states it can be in: providers that work, and providers that do not.
-      - name: Install two provider bridges
-        run: |
-          docker exec store ./install-composer-package \
-            symfony/ai-anthropic-platform symfony/ai-open-ai-platform
-
       # Magento Open Source ships PayPal_Braintree, whose admin script runs on every configuration
       # section and, on 2.4.9, intermittently throws "locations.each is not a function"
       # (PayPal_Braintree/js/system.js:239) while RequireJS is still loading the page. A module

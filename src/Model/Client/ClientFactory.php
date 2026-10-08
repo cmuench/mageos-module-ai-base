@@ -278,9 +278,8 @@ class ClientFactory implements AiClientFactoryInterface
         // The factory class comes from di.xml, so what it hands back is only ever as good as the
         // registration. Checking here names the bridge that misbehaved; without it the mistake
         // surfaces later as a call to a method on null, from a class that never mentions the
-        // registration that caused it. Deliberately not an instanceof PlatformInterface: this
-        // runs in installs where symfony/ai-platform is absent, where that would reject
-        // everything, and a bridge that got this far has already been found on the autoloader.
+        // registration that caused it. Deliberately not an instanceof PlatformInterface, matching
+        // the `object` SymfonyAiClient accepts (see its class docblock).
         if (!is_object($platform)) {
             throw new LocalizedException(
                 __(

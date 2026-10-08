@@ -23,13 +23,15 @@ class Deepseek extends AbstractAiService
     }
 
     /**
-     * @inheritdoc
+     * DeepSeek's two API aliases, labelled without a version: each alias moves to the newest model.
+     *
+     * @return array<string, string>
      */
     public function getSupportedModels(): array
     {
         return [
-            'deepseek-chat'     => 'DeepSeek V3',
-            'deepseek-reasoner' => 'DeepSeek R1',
+            'deepseek-chat'     => 'DeepSeek Chat',
+            'deepseek-reasoner' => 'DeepSeek Reasoner',
         ];
     }
 

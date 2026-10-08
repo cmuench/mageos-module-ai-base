@@ -11,18 +11,10 @@ use Symfony\AI\Platform\TokenUsage\TokenUsage;
 use Symfony\AI\Platform\TokenUsage\TokenUsageAggregation;
 
 /**
- * symfony/ai-platform is a soft dependency of this module, so these run only where it is
- * installed. Skipping beats failing: an install without the bridges is a supported setup.
+ * Runs against symfony/ai-platform's real TokenUsage classes, which the module requires.
  */
 final class UsageNormalizerTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TokenUsage::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_it_adds_cache_read_and_write_to_the_prompt_for_anthropic(): void
     {
         $usage = new TokenUsage(

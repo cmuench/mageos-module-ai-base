@@ -385,7 +385,7 @@ On Anthropic, `getRawFinishReason()` is `null` on a truncated stream: the bridge
 ### Failure modes to handle
 
 `create()` throws `LocalizedException` for setup problems (no service configured, no bridge
-registered, symfony/ai-platform not installed) with admin-readable messages. `chat()`,
+registered, the provider's Symfony AI bridge not installed) with admin-readable messages. `chat()`,
 `complete()` and `streamChat()` throw one of this module's own typed exceptions, every one of
 which extends `LocalizedException`, so an existing `catch (LocalizedException)` still catches
 everything without any change:
@@ -394,7 +394,7 @@ everything without any change:
 |---|---|---|
 | No service configured (at all, or for the requested code) | `create()` | `LocalizedException` |
 | No client bridge registered for the service code | `create()` | `LocalizedException` |
-| symfony/ai-platform not installed | `create()` | `LocalizedException` |
+| The provider's Symfony AI bridge package not installed | `create()` | `LocalizedException` |
 | A call rejected before it ever reached the provider: an unsupported option, an invalid model override, one the service's bridge has no route to, or any override on Azure (which always runs its configured deployment), a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
 | The provider rejected the configured credentials | `chat()` / `complete()` / `streamChat()` | `AiAuthenticationException` |
 | The provider throttled the call | `chat()` / `complete()` / `streamChat()` | `AiRateLimitedException` (`getRetryAfter(): ?int`) |
@@ -619,6 +619,10 @@ Notes:
 - `getId()` is the row's stable identity, and the only thing that separates two rows of the
   same provider. It is what the option source stores and what `getById()` resolves.
 - An empty array means nothing is configured — expected state on fresh installs; handle it.
+- A row an administrator **disabled** is never returned, by any lookup. It keeps its id and
+  credentials and stays in the admin form, but nothing may call it, so callers don't have to
+  check. `getLabel()` returns the name the administrator gave the row (`'Chat AI'`), or null;
+  `isEnabled()` is always true for anything the selector hands you.
 - Configuration is read at store scope, in whatever scope is ambient at the moment you call.
   In a storefront request that is the current store, so a per-store setup resolves on its own.
   **In adminhtml, in cron and on the CLI there is no current store**, so the default scope

@@ -99,11 +99,12 @@
         </arguments>
     </type>
 
-    <!-- Symfony AI provider bridges. Soft dependency: FQCN strings, resolved only when a client
-         is created, and the package name so the admin form can say what to install. Since
-         symfony/ai-platform 0.12 each bridge ships as its own package. Every bundled provider has
-         one; a third party registering a provider without a bridge is marked unsupported in the
-         admin form, since there is nothing an administrator could install for it.
+    <!-- Symfony AI provider bridges. OpenAI and Anthropic are required, every other bridge is a
+         composer `suggest`: FQCN strings, resolved only when a client is created, and the package
+         name so the admin form can say what to install. Since symfony/ai-platform 0.12 each
+         bridge ships as its own package. Every bundled provider has one; a third party
+         registering a provider without a bridge is marked unsupported in the admin form, since
+         there is nothing an administrator could install for it.
 
          `dialect` names the request-option shape the bridge speaks, which decides how the universal
          options are spelled on the wire (see Model\Client\OptionNormalizer below). It belongs here

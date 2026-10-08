@@ -50,18 +50,10 @@ use Symfony\AI\Platform\Tool\Tool;
 use Symfony\AI\Platform\TokenUsage\TokenUsage;
 
 /**
- * symfony/ai-platform is a soft dependency of this module, so these run only where it is
- * installed. Skipping beats failing: an install without the bridges is a supported setup.
+ * Runs against symfony/ai-platform's real message and result classes, which the module requires.
  */
 final class SymfonyAiClientChatTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TextResult::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_sends_the_configured_model_and_the_conversation(): void
     {
         $platform = new FakePlatform(new FakeResult(new TextResult('Hi there')));

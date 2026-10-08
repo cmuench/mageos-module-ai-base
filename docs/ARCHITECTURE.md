@@ -150,9 +150,9 @@ encrypted fields regardless of their declared type.
 
 `ClientFactory::create(?code)` → first matching configured service → resolves the bridge
 FQCN from `BridgeRegistry` → `class_exists`/`method_exists('createPlatform')` guards → builds a
-`SymfonyAiClient` carrying the platform, the model, the service code and the row id. All
-symfony/ai references are lazy (string FQCNs); the module compiles and runs without the
-package installed.
+`SymfonyAiClient` carrying the platform, the model, the service code and the row id. Bridge
+classes are referenced as string FQCNs and resolved lazily, so a provider whose suggested bridge
+is not installed fails only when a client for it is created.
 
 Per call, `SymfonyAiClient` runs the caller's options through `OptionNormalizer` before handing
 them to the platform. Bridges merge options into the provider's request body nearly untouched
@@ -365,8 +365,8 @@ saves so credential restore can match rows.
 ## Decision record: symfony/ai dependencies
 
 The client layer adapts [symfony/ai-platform](https://github.com/symfony/ai) rather than
-hand-rolling per-provider HTTP clients. The **OpenAI and Anthropic bridges are hard
-requirements** (pinned `^0.14`); every other bridge stays under `suggest`.
+hand-rolling per-provider HTTP clients. **symfony/ai-platform and the OpenAI and Anthropic
+bridges are hard requirements** (pinned `^0.14`); every other bridge stays under `suggest`.
 
 Originally every symfony/ai package was a soft dependency, for three reasons: installability
 (symfony/ai-platform needs Symfony 7.3+ components, which older Magento releases cannot

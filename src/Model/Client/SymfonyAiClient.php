@@ -30,14 +30,12 @@ use MageOS\AiBase\Model\Chat\ToolCall;
 /**
  * Adapter around a symfony/ai-platform Platform instance.
  *
- * The Symfony AI classes are referenced lazily (string FQCNs, guarded by
- * class_exists in ClientFactory) so this module does not hard-require
- * symfony/ai-platform. Native signatures therefore say `object`, while the
- * docblocks name the real platform type: annotations are never autoloaded, so
- * static analysis gets to check these calls without the runtime gaining a
- * dependency on a package that may be absent. Written against symfony/ai-platform v0.14.0; the
- * component is experimental and not covered by Symfony's BC promise, so
- * pin the version and re-verify on upgrade.
+ * symfony/ai-platform is a hard requirement, but the platform objects still arrive from bridge
+ * factories named as strings in di.xml, so native signatures here say `object` while the
+ * docblocks name the real platform type. Static analysis checks every call against that type,
+ * and the adapter accepts whatever a registered factory built, which is what the client factory
+ * checks for too. Written against symfony/ai-platform v0.14.0; the component is experimental and
+ * not covered by Symfony's BC promise, so pin the version and re-verify on upgrade.
  */
 class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
 {

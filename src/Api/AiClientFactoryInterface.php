@@ -37,8 +37,8 @@ interface AiClientFactoryInterface
      * @param string|null $serviceCode
      * @param string|null $consumer
      * @return AiClientInterface
-     * @throws LocalizedException When no matching service is configured or the
-     *         underlying client library is not installed
+     * @throws LocalizedException When no matching service is configured or the provider's
+     *         Symfony AI bridge is not installed
      */
     public function create(?string $serviceCode = null, ?string $consumer = null): AiClientInterface;
 
@@ -55,8 +55,8 @@ interface AiClientFactoryInterface
      * @param string $serviceId
      * @param string|null $consumer
      * @return AiClientInterface
-     * @throws LocalizedException When no row carries that id, or the underlying client library
-     *         is not installed
+     * @throws LocalizedException When no row carries that id, or the provider's Symfony AI
+     *         bridge is not installed
      */
     public function createById(string $serviceId, ?string $consumer = null): AiClientInterface;
 }

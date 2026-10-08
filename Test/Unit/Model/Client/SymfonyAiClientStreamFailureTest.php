@@ -24,7 +24,6 @@ use Symfony\AI\Platform\Result\RawResultInterface;
 use Symfony\AI\Platform\Result\ResultInterface;
 use Symfony\AI\Platform\Result\Stream\Delta\TextDelta;
 use Symfony\AI\Platform\Result\StreamResult;
-use Symfony\AI\Platform\Result\TextResult;
 use Symfony\AI\Platform\ResultConverterInterface;
 use Symfony\AI\Platform\TokenUsage\TokenUsage;
 use Symfony\AI\Platform\TokenUsage\TokenUsageExtractorInterface;
@@ -39,13 +38,6 @@ use Symfony\AI\Platform\TokenUsage\TokenUsageExtractorInterface;
  */
 final class SymfonyAiClientStreamFailureTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TextResult::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_it_yields_the_usage_seen_before_a_stream_failure(): void
     {
         $platform = new FakeStreamingPlatform(static function (): \Generator {

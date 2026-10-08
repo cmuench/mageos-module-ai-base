@@ -27,20 +27,12 @@ use Symfony\Component\HttpClient\Exception\TimeoutException;
 use Symfony\Component\HttpClient\Exception\TransportException;
 
 /**
- * symfony/ai-platform is a soft dependency of this module, so these run only where it is
- * installed. Skipping beats failing: an install without the bridges is a supported setup.
+ * Runs against symfony/ai-platform's real exception classes, which the module requires.
  *
  * @covers \MageOS\AiBase\Model\Client\AiExceptionMapper
  */
 final class AiExceptionMapperTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(AuthenticationException::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     /**
      * @param \Closure(): \Throwable $buildOriginal
      * @param class-string<AiServiceException> $expectedClass

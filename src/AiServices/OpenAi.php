@@ -45,16 +45,20 @@ class OpenAi extends AbstractAiService implements ModelListProviderInterface
     }
 
     /**
-     * @inheritdoc
+     * Curated fallback for a row that has not refreshed its list from the API yet.
+     *
+     * Kept short on purpose: Refresh Models lists everything the account can use.
+     *
+     * @return array<string, string>
      */
     public function getSupportedModels(): array
     {
         return [
-            'gpt-4o'      => 'GPT-4o',
-            'gpt-4o-mini' => 'GPT-4o mini',
-            'gpt-4-turbo' => 'GPT-4 Turbo',
-            'o1'          => 'o1',
-            'o1-mini'     => 'o1 mini',
+            'gpt-5.5'      => 'GPT-5.5',
+            'gpt-5.4'      => 'GPT-5.4',
+            'gpt-5.4-mini' => 'GPT-5.4 mini',
+            'gpt-5.4-nano' => 'GPT-5.4 nano',
+            'gpt-4.1'      => 'GPT-4.1',
         ];
     }
 

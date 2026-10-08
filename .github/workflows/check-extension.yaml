@@ -47,12 +47,12 @@ jobs:
       - name: Run PHPStan
         run: vendor/bin/phpstan analyse --no-progress --error-format=github
 
-  # The reusable workflow below runs the unit suite inside a Magento install, where
-  # symfony/ai-platform is absent: it is a `suggest`, and composer does not install a
-  # dependency's require-dev. Every test of the chat client layer skips there, so the
-  # mapping onto the provider bridges would go completely unverified. This job runs the
-  # module's own suite standalone with the platform installed, across the PHP range
-  # composer.json claims to support, so the floor is exercised too.
+  # The reusable workflow below runs the unit suite inside a Magento install, which has
+  # symfony/ai-platform and the OpenAI and Anthropic bridges now that composer.json requires
+  # them. That job only runs the PHP versions the Magento matrix pairs with each release,
+  # though. This one runs the chat client tests standalone across the full PHP range
+  # composer.json claims to support, so the 8.2 floor and the newest PHP are exercised against
+  # the newest symfony/ai 0.14 release too.
   unit-tests-with-ai-platform:
     name: Unit tests with symfony/ai-platform (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
@@ -71,9 +71,8 @@ jobs:
       - name: Install dependencies
         run: composer update --no-interaction --no-progress --prefer-dist
 
-      # --fail-on-skipped is the point of this job. These tests skip themselves when
-      # symfony/ai-platform is missing, so without it a job that installed nothing would
-      # still report green while verifying nothing.
+      # Nothing in this suite skips itself any more; --fail-on-skipped keeps it that way, so a
+      # skip that creeps back in cannot turn this job green while it verifies nothing.
       - name: Run tests that need the AI platform
         run: vendor/bin/phpunit -c phpunit.xml.dist --testsuite Platform --fail-on-skipped
 

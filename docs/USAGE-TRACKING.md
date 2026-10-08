@@ -151,8 +151,11 @@ The page has two parts:
   is no longer configured at all. Two rows that would still read the same, such as two unnamed
   Anthropic rows, get their row id appended ("Anthropic (_1712345)"), so every row keeps its own
   line and its own bar. The grid's service filter uses the same names.
-- **A grid** below it, listing individual calls with their date, consumer, service, model and
-  token counts, filterable and sortable like any other admin grid.
+- **A grid** below it, listing individual calls with their date, consumer, service, model, store
+  and token counts, filterable and sortable like any other admin grid. Calls recorded under store 0
+  show **Admin, cron and CLI** as their store.
+
+![The AI Token Usage grid: one row per call with its date, consumer, service, model, input, output, cache and total tokens, whether it failed or streamed, and the store it was recorded under](images/admin-usage-grid.png)
 
 A **store selector** sits beside the period one and narrows every number on the page, the trend
 included, to a single scope. Alongside the store views it offers **Admin, cron and CLI**, which is
@@ -170,7 +173,9 @@ Which store a call is recorded under:
 - **Known limitation:** outside a storefront, Magento reports the default store view as the
   current store even when nothing chose it, so code that deliberately emulates the default store
   view itself cannot be told apart from code that emulates nothing. Its calls are recorded under
-  store 0, not under the default store view. A URL naming a store that no longer exists falls back to every store rather than to none,
+  store 0, not under the default store view.
+
+A URL naming a store that no longer exists falls back to every store rather than to none,
 so a stale bookmark shows a total that is too broad, which a reader can see, rather than an empty
 page.
 

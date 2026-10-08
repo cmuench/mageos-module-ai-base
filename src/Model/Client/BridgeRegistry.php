@@ -7,10 +7,10 @@ namespace MageOS\AiBase\Model\Client;
 /**
  * Maps service codes to their Symfony AI bridge and the composer package that provides it.
  *
- * The bridges are a soft dependency: the module stores and serves provider configuration with
- * none of them installed, and other modules may talk to a provider with their own HTTP client.
- * They are only needed by the bundled client layer (`AiClientInterface`) and the admin's Test
- * Connection button.
+ * The OpenAI and Anthropic bridges are required by composer.json; every other bridge is a
+ * `suggest`. The module stores and serves provider configuration without a provider's bridge,
+ * and other modules may talk to a provider with their own HTTP client. A bridge is only needed by
+ * the bundled client layer (`AiClientInterface`) and the admin's Test Connection button.
  *
  * Since symfony/ai-platform 0.12 the bridges ship as one package per provider rather than inside
  * the platform package, so knowing the package name per service code is what lets the admin form

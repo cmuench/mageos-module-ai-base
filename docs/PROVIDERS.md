@@ -160,9 +160,9 @@ mismatch is misleading rather than broken.
 ### 4. Wire a client bridge (optional but recommended)
 
 `AiClientFactoryInterface` builds clients from [symfony/ai-platform](https://github.com/symfony/ai)
-bridges. The OpenAI and Anthropic bridges ship with the module; every other bridge is a
-**soft dependency** (only needed when a client for that provider is actually created;
-`composer suggest`s it). Bridges are registered per service code. The `bridges` and `dialects`
+bridges. symfony/ai-platform and the OpenAI and Anthropic bridges are required by the module;
+every other bridge is a `suggest`, only needed when a client for that provider is actually
+created. Bridges are registered per service code. The `bridges` and `dialects`
 argument keys shown below are a stable contract within a major version, even though the classes
 they configure are not `@api`:
 
@@ -359,6 +359,20 @@ public function __construct(
 - The form's JavaScript is emitted through `SecureHtmlRenderer` and is CSP-compliant; if you
   extend the template, keep script content inside the rendered tag rather than adding inline
   `<script>` blocks.
+- Every row shows its provider and model, so the same provider can be added once per account. The
+  pencil names a row, and the toggle takes it out of use without deleting its credentials. In
+  developer mode the form also offers providers whose bridge package is missing and names the
+  package to install; production leaves them out.
+- **Test Connection** sends a minimal prompt through the bundled client for the row it sits in and
+  shows latency and the response inline. Only saved rows can be tested, since the client reads
+  saved configuration. A failure is reported by kind (rejected key, rate limit, unreachable host,
+  rejected request); the full error, which can include the request URL, goes to the Magento log
+  instead of the page.
+- **Refresh Models** fetches the provider's model list with the row's saved credentials, only when
+  clicked. A select field gets the list as its options; a free-text model field (OpenRouter,
+  Ollama, LM Studio) gets it as autocomplete suggestions, so an unlisted model can still be typed.
+- Credentials saved before encryption existed are detected and returned as they are, and
+  encrypted on the next save of the form.
 
 ## Testing your provider
 

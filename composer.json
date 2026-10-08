@@ -1,6 +1,6 @@
 {
     "name": "mage-os/module-ai-base",
-    "description": "Base AI module for Mage-OS — register and retrieve configuration for multiple AI backends.",
+    "description": "Base AI module for Mage-OS: register and retrieve configuration for multiple AI backends.",
     "type": "magento2-module",
     "license": [
         "OSL-3.0",
@@ -8,8 +8,17 @@
     ],
     "authors": [
         {
+            "name": "Michiel Gerritsen",
+            "email": "michiel@controlaltdelete.nl",
+            "role": "Maintainer"
+        },
+        {
             "name": "David Lambauer",
             "email": "david@run-as-root.sh"
+        },
+        {
+            "name": "Mage-OS contributors",
+            "homepage": "https://github.com/mage-os-lab/module-ai-base/graphs/contributors"
         }
     ],
     "support": {

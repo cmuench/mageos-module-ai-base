@@ -94,9 +94,9 @@ Multiple entries per code are possible because admins can add the same backend m
 Stored data flow:
 
 1. Admin form is an `AbstractFieldArray` rendered via `view/adminhtml/templates/system/config/form/field/services.phtml`.
-2. Each `AiServiceConfigurationInterface::getConfigurationTemplate()` returns an HTML fragment using `<%- _fieldName %>` as a `mage/template` placeholder. The phtml wires those into per-row inputs when the admin clicks one of the "Add Service" buttons.
-3. Magento serializes the posted rows as JSON via `Magento\Config\Model\Config\Backend\Serialized\ArraySerialized` into `core_config_data` at path **`mageos_ai/services/configuration`**.
-4. `AiServiceSelector::getParsedConfig()` reads that path, json_decodes it, and wraps each row with `AiServiceInterfaceFactory`. Each row's structure is `{ _rowId: { <service_code>: { ...fields } } }`, which is why the selector does `array_first(array_keys($item))` to extract the code.
+2. Each `AiServiceConfigurationInterface::getConfigurationFields()` returns `Api\Data\FieldDescriptorInterface` objects (name, label, type, options, default, encrypted). `Block\Adminhtml\Configuration\Services::getServicesSchemaJson()` turns them into a JSON schema keyed by service code, and the JavaScript in services.phtml builds the per-row inputs from it when the admin clicks one of the "Add Service" buttons. Providers never emit HTML.
+3. `Model\Config\Backend\EncryptedServices` (an `ArraySerialized` subclass) encrypts the flagged fields and stores the posted rows as JSON in `core_config_data` at path **`mageos_ai/services/configuration`**.
+4. `AiServiceSelector::getParsedConfig()` reads that path, json_decodes it, decrypts the flagged fields and wraps each row with `AiServiceInterfaceFactory`. Each row's structure is `{ _rowId: { <service_code>: { ...fields } } }`, which is why the selector does `array_key_first($row)` to extract the code.
 
 **Usage tracking** adds two real database tables (not `core_config_data`), declared in `etc/db_schema.xml`:
 
