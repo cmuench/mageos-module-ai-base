@@ -37,7 +37,7 @@ bin/magento module:enable MageOS_AiBase
 bin/magento setup:upgrade
 ```
 
-Requires Magento 2.4.7+ or Mage-OS, and PHP 8.2+. OpenAI and Anthropic work out of the box; every
+Requires Magento 2.4.8+ or Mage-OS 1.1+, and PHP 8.2+. OpenAI and Anthropic work out of the box; every
 other provider needs its Symfony AI bridge package, which the admin form names when it's missing.
 
 The client is built on [symfony/ai-platform](https://github.com/symfony/ai) 0.14, which is

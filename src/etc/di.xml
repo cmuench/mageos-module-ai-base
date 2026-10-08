@@ -546,17 +546,13 @@
 
     <!-- Encryption key rotation. Magento only re-encrypts config values that are a ciphertext as a
          whole, so the AI credentials inside the services JSON would stay under the old key, and
-         decrypt to nothing once that key is removed from crypt/key. Two plugins cover the two ways
-         a key change re-encrypts data: the admin "Manage Encryption Key" page (Change, on 2.4.7
-         and its patch releases) and `bin/magento encryption:data:re-encrypt` (the core_config_data handler,
-         2.4.7-p4 and later). Magento_EncryptionKey is deliberately not a dependency: a plugin on a
-         class that is absent or belongs to a disabled module is never called. -->
+         decrypt to nothing once that key is removed from crypt/key. On every supported version a
+         key change re-encrypts data through `bin/magento encryption:data:re-encrypt`, so the
+         plugin sits on its core_config_data handler. Magento_EncryptionKey is deliberately not a
+         dependency: a plugin on a class that is absent or belongs to a disabled module is never
+         called. -->
     <preference for="MageOS\AiBase\Model\Config\StoredServicesStorageInterface"
                 type="MageOS\AiBase\Model\Config\StoredServicesStorage"/>
-    <type name="Magento\EncryptionKey\Model\ResourceModel\Key\Change">
-        <plugin name="mageos_ai_re_encrypt_credentials"
-                type="MageOS\AiBase\Plugin\EncryptionKey\ReEncryptAfterKeyChange"/>
-    </type>
     <type name="Magento\Config\Model\Data\ReEncryptorList\CoreConfigDataReEncryptor\Handler">
         <plugin name="mageos_ai_re_encrypt_credentials"
                 type="MageOS\AiBase\Plugin\EncryptionKey\ReEncryptWithCoreConfigData"/>

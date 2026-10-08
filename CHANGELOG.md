@@ -105,6 +105,9 @@ Since v0.0.1:
   the script is rendered through `SecureHtmlRenderer` for CSP.
 
 ### Upgrading from 0.0.1
+- Requires Magento 2.4.8+ or Mage-OS 1.1+, and PHP 8.2+. A standard Magento 2.4.7 project cannot
+  install it: its template requires MFTF 4.7, whose symfony/event-dispatcher ^6.4 conflicts with
+  the ^7.3 symfony/ai-platform needs.
 - `composer update mage-os/module-ai-base --with-dependencies`, and bump any suggested bridges you
   installed to `^0.14`.
 - `bin/magento setup:upgrade` and `bin/magento setup:di:compile`. The usage tables are unchanged.

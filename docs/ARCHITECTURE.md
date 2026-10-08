@@ -97,7 +97,6 @@ Controller/Adminhtml/
   Service/RefreshModels              manual model list refresh endpoint (JSON)
   Usage/Index                        the Reports > AI Token Usage admin page
 Plugin/EncryptionKey/
-  ReEncryptAfterKeyChange            after Key\Change::changeEncryptionKey() (admin key change page)
   ReEncryptWithCoreConfigData        after the core_config_data re-encryptor (encryption:data:re-encrypt)
 Cron/
   RollUpUsage                        scheduled entry point for UsageMaintenance
@@ -350,23 +349,23 @@ saves so credential restore can match rows.
   are only a fallback for rows whose provider is no longer registered.
 - **Encryption key rotation**: Magento re-encrypts only config values that are a ciphertext as a
   whole, so the credentials inside the services JSON would stay under the old key and decrypt to
-  an empty string once it is removed from `crypt/key`. Two plugins in `Plugin\EncryptionKey` hook
-  the two places Magento re-encrypts after a key change: `Key\Change::changeEncryptionKey()` (the
-  admin "Manage Encryption Key" page, 2.4.7 and its patch releases; the page is gone in 2.4.8) and
-  the `core_config_data` handler of `bin/magento encryption:data:re-encrypt` (2.4.7-p4 and later;
-  `encryption:key:change` itself only writes the new key). Both run `Model\Config\CredentialReEncryptor`,
+  an empty string once it is removed from `crypt/key`. `Plugin\EncryptionKey\ReEncryptWithCoreConfigData`
+  hooks the one place Magento re-encrypts after a key change on every supported version: the
+  `core_config_data` handler of `bin/magento encryption:data:re-encrypt` (`encryption:key:change`
+  itself only writes the new key, and the admin "Manage Encryption Key" page no longer exists from
+  2.4.8 on). It runs `Model\Config\CredentialReEncryptor`,
   which reads the raw value of every scope from `core_config_data`, re-encrypts only the fields
   `SensitiveDataProcessor` reports as encrypted, and writes each copy back only if it still holds
   what was read. A value that does not decrypt (or whose new ciphertext does not decrypt back) is
   left as stored and logged with its location, never blanked. Magento_EncryptionKey is not a
   dependency: a plugin on a class that is missing or belongs to a disabled module never runs, and
-  neither plugin class implements one of its interfaces, so `setup:di:compile` works without it.
-  Limits, the same as core's: a value pinned in `app/etc/env.php` or `config.php` is not
-  re-encrypted, and on 2.4.7 to 2.4.7-p3 `encryption:key:change` re-encrypts nothing at all.
+  the plugin class implements none of its interfaces, so `setup:di:compile` works without it.
+  Limit, the same as core's: a value pinned in `app/etc/env.php` or `config.php` is not
+  re-encrypted.
 - **Legacy tolerance**: values without the encryptor envelope are treated as plaintext and
   pass through reads unchanged; they get encrypted on the next admin save.
 - **CSP**: all form JavaScript is emitted through `SecureHtmlRenderer` (hash/nonce), safe
-  under strict admin CSP (Magento 2.4.7+).
+  under strict admin CSP.
 - **Endpoints**: `Service\Test` and `Service\RefreshModels` are POST-only, form-key validated
   (enforced by the `Backend\App\AbstractAction` plugin chain — which is why they extend
   `Backend\App\Action` rather than using pure composition), and gated by the
@@ -392,9 +391,13 @@ second, manual `composer require` before anything works is a worse default than 
 narrows its installable range. Requiring the two bridges means a fresh install can talk to
 OpenAI and Anthropic immediately, at the accepted cost that config-registry-only consumers
 carry the SDK and that the module only installs where the dependency graph allows Symfony
-7.3+ components. The `magento/framework` constraint is narrowed to `^103.0.7 || ^104.0`
-(Magento 2.4.7+) to state that floor honestly: 2.4.6's Symfony 5.4 line cannot resolve next
-to symfony/ai-platform, while 2.4.7 and 2.4.8 can.
+7.3+ components. The `magento/framework` constraint is narrowed to `^103.0.8 || ^104.0`
+(Magento 2.4.8+, Mage-OS 1.1+) to state that floor honestly. 2.4.6's Symfony 5.4 line cannot
+resolve next to symfony/ai-platform. 2.4.7's own packages can, but every 2.4.7 project template
+(up to 2.4.7-p10) requires MFTF ^4.7 in require-dev, which needs symfony/event-dispatcher ^6.4,
+and pins allure-phpunit ^2, which rules out the MFTF releases that would move on. A standard
+2.4.7 project therefore cannot install this module. CI tests the floor: Magento 2.4.8 on PHP
+8.2 (check-extension) and on PHP 8.3 (E2E).
 
 **Churn isolation still stands unchanged.** The component is experimental with no BC promise.
 Its README says so outright: *"This Component is experimental. Experimental features are not

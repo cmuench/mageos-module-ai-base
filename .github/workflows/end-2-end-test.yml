@@ -16,10 +16,10 @@ jobs:
   # and the newest release each appear at least once. Bump the PLATFORM and PHP_VERSION values
   # when a new Magento, Mage-OS or PHP release is added to magento2-in-a-box.
   #
-  # The first entry is the oldest combination composer.json allows: Magento 2.4.7 (framework
-  # 103.0.7) on PHP 8.2. It runs Symfony 6.4 console next to the Symfony 7.4 components
-  # symfony/ai-platform pulls in, which no other entry does. Raise it together with the
-  # magento/framework and php constraints, never on its own.
+  # The first entry is the oldest Magento composer.json allows: 2.4.8 (framework 103.0.8). It
+  # runs on PHP 8.3 because magento2-in-a-box has no PHP 8.2 image for 2.4.8; the check-extension
+  # workflow covers 2.4.8 on PHP 8.2. Raise it together with the magento/framework constraint,
+  # never on its own.
   e2e-tests:
     name: E2E (${{ matrix.PLATFORM }}, ${{ matrix.PHP_VERSION }}, ${{ matrix.MAGENTO_MODE }})
     runs-on: ubuntu-latest
@@ -27,9 +27,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - PLATFORM: magento2.4.7
+          - PLATFORM: magento2.4.8
             IMAGE: magento-project-community-edition
-            PHP_VERSION: php82-fpm
+            PHP_VERSION: php83-fpm
             MAGENTO_MODE: production
           - PLATFORM: magento2.4.9
             IMAGE: magento-project-community-edition

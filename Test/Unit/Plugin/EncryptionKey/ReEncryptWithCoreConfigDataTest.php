@@ -28,7 +28,7 @@ final class ReEncryptWithCoreConfigDataTest extends TestCase
     protected function setUp(): void
     {
         if (!class_exists(Handler::class)) {
-            self::markTestSkipped('The core_config_data re-encryptor needs Magento 2.4.7-p4 or later.');
+            self::markTestSkipped('The core_config_data re-encryptor needs Magento_EncryptionKey, which ships with Magento.');
         }
     }
 
