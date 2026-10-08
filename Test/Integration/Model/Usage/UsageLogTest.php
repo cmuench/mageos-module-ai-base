@@ -7,8 +7,8 @@ namespace MageOS\AiBase\Test\Integration\Model\Usage;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\TestFramework\Helper\Bootstrap;
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
-use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageLog;
 use PHPUnit\Framework\TestCase;
 
@@ -22,12 +22,13 @@ use PHPUnit\Framework\TestCase;
  * bounded batch delete and the half-open window boundary, both of which are MySQL's behaviour, not
  * PHP's.
  *
- * {@see UsageLog::seriesRange()}'s store-timezone bucketing (task 021) is exercised here rather
+ * {@see UsageLog::seriesRange()}'s timezone bucketing (task 021) is exercised here rather
  * than in the unit suite for the same reason: the fake in
  * {@see \MageOS\AiBase\Test\Unit\Model\Usage\UsageRecordRepositoryTest} only proves this
  * repository delegates to the resource model, never the resource model's own bucket-boundary
  * arithmetic, since that arithmetic reads the real `TimezoneInterface`, which only a bootstrapped
- * store (and therefore this suite) has.
+ * store (and therefore this suite) has. The timezone fixtures set the default scope, because
+ * usage reporting reads the timezone there and nowhere else.
  */
 final class UsageLogTest extends TestCase
 {
@@ -297,12 +298,12 @@ final class UsageLogTest extends TestCase
         $byConsumer = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER
+            UsageRecordReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageRecordRepositoryInterface::GROUP_BY_SERVICE
+            UsageRecordReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));
@@ -319,7 +320,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone America/Los_Angeles
+     * @magentoConfigFixture general/locale/timezone America/Los_Angeles
      */
     public function test_it_returns_a_per_day_series_aligned_to_store_timezone_days(): void
     {
@@ -329,7 +330,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('America/Los_Angeles')),
             new \DateTimeImmutable('2026-01-17 00:00:00', new \DateTimeZone('America/Los_Angeles')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         self::assertSame(['2026-01-15', '2026-01-16'], array_column($series, 'period'));
@@ -338,7 +339,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone America/Los_Angeles
+     * @magentoConfigFixture general/locale/timezone America/Los_Angeles
      */
     public function test_it_returns_a_per_month_series_aligned_to_store_timezone_months(): void
     {
@@ -351,7 +352,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-01 00:00:00', new \DateTimeZone('America/Los_Angeles')),
             new \DateTimeImmutable('2026-03-01 00:00:00', new \DateTimeZone('America/Los_Angeles')),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            UsageDailyReportInterface::GRANULARITY_MONTH
         );
 
         $totalsByPeriod = array_combine(array_column($series, 'period'), array_column($series, 'total_tokens'));
@@ -360,7 +361,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone America/Los_Angeles
+     * @magentoConfigFixture general/locale/timezone America/Los_Angeles
      */
     public function test_it_buckets_a_call_made_late_in_the_evening_into_the_store_timezone_day(): void
     {
@@ -371,7 +372,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('America/Los_Angeles')),
             new \DateTimeImmutable('2026-01-17 00:00:00', new \DateTimeZone('America/Los_Angeles')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         $totalsByPeriod = array_combine(array_column($series, 'period'), array_column($series, 'total_tokens'));
@@ -380,7 +381,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone America/Los_Angeles
+     * @magentoConfigFixture general/locale/timezone America/Los_Angeles
      */
     public function test_it_buckets_a_call_made_just_after_midnight_utc_into_the_previous_store_timezone_day(): void
     {
@@ -390,7 +391,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('America/Los_Angeles')),
             new \DateTimeImmutable('2026-01-17 00:00:00', new \DateTimeZone('America/Los_Angeles')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         $totalsByPeriod = array_combine(array_column($series, 'period'), array_column($series, 'total_tokens'));
@@ -399,7 +400,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone Europe/Amsterdam
+     * @magentoConfigFixture general/locale/timezone Europe/Amsterdam
      */
     public function test_it_keeps_a_day_that_gains_an_hour_to_daylight_saving_as_one_bucket(): void
     {
@@ -411,7 +412,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-03-29 00:00:00', new \DateTimeZone('Europe/Amsterdam')),
             new \DateTimeImmutable('2026-03-30 00:00:00', new \DateTimeZone('Europe/Amsterdam')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         self::assertCount(1, $series);
@@ -420,7 +421,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone UTC
+     * @magentoConfigFixture general/locale/timezone UTC
      */
     public function test_it_excludes_rows_on_the_closing_boundary_of_a_bucket(): void
     {
@@ -430,7 +431,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('UTC')),
             new \DateTimeImmutable('2026-01-16 00:00:00', new \DateTimeZone('UTC')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         self::assertCount(1, $series);
@@ -439,7 +440,7 @@ final class UsageLogTest extends TestCase
     }
 
     /**
-     * @magentoConfigFixture default_store general/locale/timezone UTC
+     * @magentoConfigFixture general/locale/timezone UTC
      */
     public function test_it_returns_an_empty_bucket_rather_than_skipping_a_day_with_no_usage(): void
     {
@@ -449,7 +450,7 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00', new \DateTimeZone('UTC')),
             new \DateTimeImmutable('2026-01-18 00:00:00', new \DateTimeZone('UTC')),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
 
         self::assertSame(['2026-01-15', '2026-01-16', '2026-01-17'], array_column($series, 'period'));
@@ -481,7 +482,7 @@ final class UsageLogTest extends TestCase
         $storeOne = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageRecordReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -500,7 +501,7 @@ final class UsageLogTest extends TestCase
         $storeOne = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             1
         );
 
@@ -524,8 +525,8 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-17 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageRecordReportInterface::GROUP_BY_CONSUMER
         );
 
         $byBucketAndGroup = [];
@@ -550,8 +551,8 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageRecordRepositoryInterface::GROUP_BY_SERVICE
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageRecordReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['_row1', '_row2'], array_column($series, 'service_id'));
@@ -569,8 +570,8 @@ final class UsageLogTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageRecordReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -586,7 +587,7 @@ final class UsageLogTest extends TestCase
         $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             'model'
         );
     }

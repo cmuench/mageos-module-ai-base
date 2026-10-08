@@ -4,23 +4,71 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Config\Source;
 
+require_once __DIR__ . '/../../../Stubs/FixedConfigScopeResolver.php';
+
+use Magento\Framework\App\RequestInterface;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Model\AiService;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
+use MageOS\AiBase\Model\Config\ConfigScope;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\Config\Source\ConfiguredService;
 use MageOS\AiBase\Model\Config\Source\ConfiguredServiceWithAutomatic;
 use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\ServiceScope;
+use MageOS\AiBase\Test\Unit\Stubs\FixedConfigScopeResolver;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
 final class ConfiguredServiceTest extends TestCase
 {
     private AiServiceSelectorInterface&MockObject $serviceSelector;
+    private ServiceScope $serviceScope;
+    private ConfigScopeResolver $scopeResolver;
 
     protected function setUp(): void
     {
         $this->serviceSelector = $this->createMock(AiServiceSelectorInterface::class);
+        $this->serviceScope = new ServiceScope();
+        $this->scopeResolver = FixedConfigScopeResolver::atDefault();
+    }
+
+    /**
+     * On a website's config page the dropdown lists that website's rows, because a value saved there
+     * is resolved at runtime against that website's services.
+     */
+    public function test_lists_the_rows_of_the_scope_being_edited(): void
+    {
+        $this->scopeResolver = new FixedConfigScopeResolver(new ConfigScope('websites', 2, 'second'));
+        $this->serviceSelector->method('getAll')->willReturnCallback(
+            fn (): array => $this->serviceScope->getCurrent()?->getCode() === 'second'
+                ? [new AiService('_website_row', 'openai', ['model' => 'gpt-4o'])]
+                : [new AiService('_default_row', 'openai', ['model' => 'gpt-4o'])]
+        );
+
+        self::assertSame(['_website_row'], array_column($this->subject()->toOptionArray(), 'value'));
+        self::assertNull($this->serviceScope->getCurrent());
+    }
+
+    /**
+     * Without a website or store on the page nothing changes: the selector answers in its ambient
+     * scope, exactly as it did before the option source knew about scopes.
+     */
+    public function test_leaves_the_ambient_scope_alone_when_no_scope_is_being_edited(): void
+    {
+        $scopes = [];
+        $this->serviceSelector->method('getAll')->willReturnCallback(
+            function () use (&$scopes): array {
+                $scopes[] = $this->serviceScope->getCurrent();
+
+                return [];
+            }
+        );
+
+        $this->subject()->toOptionArray();
+
+        self::assertSame([null], $scopes);
     }
 
     public function test_offers_no_options_when_nothing_is_configured(): void
@@ -203,12 +251,26 @@ final class ConfiguredServiceTest extends TestCase
 
     private function subject(): ConfiguredService
     {
-        return new ConfiguredService($this->serviceSelector, $this->services(), $this->bridges());
+        return new ConfiguredService(
+            $this->serviceSelector,
+            $this->services(),
+            $this->bridges(),
+            $this->createStub(RequestInterface::class),
+            $this->scopeResolver,
+            $this->serviceScope,
+        );
     }
 
     private function automaticSubject(): ConfiguredServiceWithAutomatic
     {
-        return new ConfiguredServiceWithAutomatic($this->serviceSelector, $this->services(), $this->bridges());
+        return new ConfiguredServiceWithAutomatic(
+            $this->serviceSelector,
+            $this->services(),
+            $this->bridges(),
+            $this->createStub(RequestInterface::class),
+            $this->scopeResolver,
+            $this->serviceScope,
+        );
     }
 
     private function services(): ServiceRegistry

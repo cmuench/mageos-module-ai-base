@@ -4,21 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
-use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
-
-class HuggingFace implements AiServiceConfigurationInterface
+class HuggingFace extends AbstractAiService
 {
-    use FieldFactoryTrait;
-
-    /**
-     * @param FieldDescriptorInterfaceFactory $fieldFactory
-     */
-    public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-    ) {
-    }
-
     /**
      * @inheritdoc
      */
@@ -49,8 +36,8 @@ class HuggingFace implements AiServiceConfigurationInterface
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->freeTextModelField($this->fieldFactory),
+            $this->apiKeyField(),
+            $this->freeTextModelField(),
         ];
     }
 }

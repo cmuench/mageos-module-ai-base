@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\ResourceModel\Usage;
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
 use Magento\Framework\Model\ResourceModel\Db\AbstractDb;
@@ -47,34 +47,53 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
 
     /**
      * Grouping-key column also usable as a
-     * {@see UsageDailyRepositoryInterface::GROUP_BY_CONSUMER} value.
+     * {@see UsageDailyReportInterface::GROUP_BY_CONSUMER} value.
      */
     private const COLUMN_CONSUMER = 'consumer';
 
     /**
-     * Columns {@see upsertAggregates()} updates when a batch row collides with an existing one on
-     * the unique grouping key.
+     * Column {@see upsertAggregates()} overwrites with the incoming value when a batch row collides
+     * with an existing one on the unique grouping key.
      *
-     * Deliberately excludes `entity_id` and every column in the unique constraint
-     * (`usage_date`, `service_id`, `model`, `consumer`, `store_id`): those identify which row is
-     * being replaced, so rewriting them on a match would be a no-op at best and a silent
-     * cross-group corruption at worst. `service_code` is included even though it is derivable from
-     * `service_id`, in case a service row's code ever changes between two roll-up runs of the same
-     * day. `failed_calls`, `cache_read_tokens` and `cache_write_tokens` are included for the same
-     * reason as every other count column: without them here, re-rolling a day that already has a
-     * row would leave that row's failure count and cache split stuck at whatever the first run
-     * wrote, silently going stale on every later run instead of being replaced along with the rest
-     * of the aggregate.
+     * `service_code` is a label, not a count, so the latest run's value simply wins; it is kept in
+     * the update at all in case a service row's code ever changes between two roll-up runs of the
+     * same day. Every column in the unique constraint (`usage_date`, `service_id`, `model`,
+     * `consumer`, `store_id`) and `entity_id` stay out of the update entirely: they identify which
+     * row is being added to, so rewriting them would be a no-op at best and a silent cross-group
+     * corruption at worst.
+     */
+    private const COLUMN_SERVICE_CODE = 'service_code';
+
+    /**
+     * Never-null count columns {@see upsertAggregates()} adds the incoming value to on a collision.
+     *
+     * Additive rather than replacing because the raw rows behind a stored total are deleted once
+     * rolled up: a later run that finds new raw rows for the same day (a late row, or a reporting
+     * timezone change that moved the day boundaries) only knows about those, and writing that
+     * partial total over the stored one would erase the rest of the day for good.
      *
      * @var string[]
      */
-    private const UPDATE_ON_DUPLICATE_COLUMNS = [
-        'service_code',
+    private const ADDITIVE_COLUMNS = [
         'calls',
         'failed_calls',
         'input_tokens',
         'output_tokens',
         'total_tokens',
+    ];
+
+    /**
+     * Nullable count columns {@see upsertAggregates()} adds the incoming value to on a collision,
+     * keeping null's meaning.
+     *
+     * Null in these columns means "no call in this row reported the figure", which is a different
+     * statement from zero. Plain `col + VALUES(col)` would turn a known stored total into null the
+     * moment a batch without that figure arrived, so the update keeps whichever side is known and
+     * only stays null when neither side is.
+     *
+     * @var string[]
+     */
+    private const NULLABLE_ADDITIVE_COLUMNS = [
         'cache_read_tokens',
         'cache_write_tokens',
         'reasoning_tokens',
@@ -90,8 +109,8 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * @var string[]
      */
     private const ALLOWED_GROUP_BY_COLUMNS = [
-        UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
-        UsageDailyRepositoryInterface::GROUP_BY_SERVICE,
+        UsageDailyReportInterface::GROUP_BY_CONSUMER,
+        UsageDailyReportInterface::GROUP_BY_SERVICE,
     ];
 
     /**
@@ -100,8 +119,8 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * @var string[]
      */
     private const ALLOWED_GRANULARITIES = [
-        UsageDailyRepositoryInterface::GRANULARITY_DAY,
-        UsageDailyRepositoryInterface::GRANULARITY_MONTH,
+        UsageDailyReportInterface::GRANULARITY_DAY,
+        UsageDailyReportInterface::GRANULARITY_MONTH,
     ];
 
     /**
@@ -121,7 +140,43 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
             return;
         }
 
-        $this->connection()->insertOnDuplicate($this->getMainTable(), $rows, self::UPDATE_ON_DUPLICATE_COLUMNS);
+        $this->connection()->insertOnDuplicate($this->getMainTable(), $rows, $this->onDuplicateUpdates());
+    }
+
+    /**
+     * The `ON DUPLICATE KEY UPDATE` assignments, keyed by column, that add a colliding row on.
+     *
+     * Adding onto the stored row rather than writing over it; see {@see ADDITIVE_COLUMNS} for why
+     * adding is the only safe choice.
+     *
+     * A nullable column uses `COALESCE(col + VALUES(col), col, VALUES(col))`: the sum when both
+     * sides are known, whichever side is known when only one is, and null only when neither is.
+     *
+     * @return array<string,string|\Zend_Db_Expr>
+     */
+    private function onDuplicateUpdates(): array
+    {
+        $connection = $this->connection();
+        $additive = array_map(
+            fn (string $column): \Zend_Db_Expr => new \Zend_Db_Expr(sprintf(
+                '%1$s + VALUES(%1$s)',
+                $connection->quoteIdentifier($column)
+            )),
+            array_combine(self::ADDITIVE_COLUMNS, self::ADDITIVE_COLUMNS)
+        );
+        $nullableAdditive = array_map(
+            fn (string $column): \Zend_Db_Expr => new \Zend_Db_Expr(sprintf(
+                'COALESCE(%1$s + VALUES(%1$s), %1$s, VALUES(%1$s))',
+                $connection->quoteIdentifier($column)
+            )),
+            array_combine(self::NULLABLE_ADDITIVE_COLUMNS, self::NULLABLE_ADDITIVE_COLUMNS)
+        );
+
+        return array_merge(
+            [self::COLUMN_SERVICE_CODE => self::COLUMN_SERVICE_CODE],
+            $additive,
+            $nullableAdditive
+        );
     }
 
     /**
@@ -260,7 +315,7 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      * `calls` and `failed_calls` sum the daily table's own pre-aggregated counts rather than
      * counting rows: unlike the raw log, one row here already represents many calls. The token
      * columns coalesce a `NULL` sum (no matching row) to `0`, matching the "always an int, zero
-     * when nothing matched" promise on {@see UsageDailyRepositoryInterface::sumRange()}.
+     * when nothing matched" promise on {@see UsageDailyReportInterface::sumRange()}.
      * `cache_read_tokens`, `cache_write_tokens` and `reasoning_tokens` are left to sum to a genuine
      * `NULL` when nothing reported them, since MySQL's `SUM()` already ignores `NULL` inputs and
      * only returns `NULL` itself when every input was `NULL` — exactly the "stays null, never
@@ -294,7 +349,7 @@ class UsageDaily extends AbstractDb implements UsageDailyResourceInterface
      */
     private function periodExpression(string $granularity): string|\Zend_Db_Expr
     {
-        return $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH
+        return $granularity === UsageDailyReportInterface::GRANULARITY_MONTH
             ? new \Zend_Db_Expr(sprintf("DATE_FORMAT(%s, '%%Y-%%m')", self::COLUMN_USAGE_DATE))
             : self::COLUMN_USAGE_DATE;
     }

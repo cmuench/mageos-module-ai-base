@@ -18,6 +18,7 @@ use MageOS\AiBase\Api\Data\StreamChunkType;
 use MageOS\AiBase\Api\Data\TokenUsageInterface;
 use MageOS\AiBase\Api\Data\ToolDefinitionInterface;
 use MageOS\AiBase\Api\Data\UsageRecordInterface;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Chat\ChatMessage;
 use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Chat\ChatResponse;
@@ -25,18 +26,17 @@ use MageOS\AiBase\Model\Chat\Reasoning;
 use MageOS\AiBase\Model\Chat\StreamChunk;
 use MageOS\AiBase\Model\Chat\TokenUsage;
 use MageOS\AiBase\Model\Chat\ToolCall;
+use Psr\Log\LoggerInterface;
 
 /**
  * Adapter around a symfony/ai-platform Platform instance.
  *
- * The Symfony AI classes are referenced lazily (string FQCNs, guarded by
- * class_exists in ClientFactory) so this module does not hard-require
- * symfony/ai-platform. Native signatures therefore say `object`, while the
- * docblocks name the real platform type: annotations are never autoloaded, so
- * static analysis gets to check these calls without the runtime gaining a
- * dependency on a package that may be absent. Written against symfony/ai-platform v0.14.0; the
- * component is experimental and not covered by Symfony's BC promise, so
- * pin the version and re-verify on upgrade.
+ * symfony/ai-platform is a hard requirement, but the platform objects still arrive from bridge
+ * factories named as strings in di.xml, so native signatures here say `object` while the
+ * docblocks name the real platform type. Static analysis checks every call against that type,
+ * and the adapter accepts whatever a registered factory built, which is what the client factory
+ * checks for too. Written against symfony/ai-platform v0.14.0; the component is experimental and
+ * not covered by Symfony's BC promise, so pin the version and re-verify on upgrade.
  */
 class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
 {
@@ -109,6 +109,8 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      *        so the reasoning-include workaround below applies only to the bridges that need it.
      *        Required, like the normalizers, because Magento only auto-wires a required class-typed
      *        argument and compiles an optional one's default into generated/metadata as a value
+     * @param LoggerInterface $logger Records the one failure this client deliberately absorbs
+     *        instead of throwing; see {@see extractTruncatedStreamReasoning()}
      * @param string|null $consumer Feature or module the factory attributed this client to;
      *        read back, normalized, through getConsumer()
      */
@@ -121,6 +123,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         private readonly UsageNormalizer $usageNormalizer,
         private readonly AiExceptionMapper $exceptionMapper,
         private readonly BridgeRegistry $bridgeRegistry,
+        private readonly LoggerInterface $logger,
         private readonly ?string $consumer = null,
     ) {
     }
@@ -184,7 +187,13 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         } catch (\Symfony\AI\Platform\Exception\MaxOutputTokensException) {
             yield from $this->yieldUsageMissedByTheDeltas($result, $usage);
 
-            return $this->truncatedResponse($text, $toolCalls, $usage, $result);
+            return $this->truncatedResponse(
+                $text,
+                $toolCalls,
+                $usage,
+                $result,
+                $this->extractTruncatedStreamReasoning($result),
+            );
         } catch (\Throwable $e) {
             yield from $this->yieldUsageMissedByTheDeltas($result, $usage);
 
@@ -322,7 +331,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
     /**
      * @inheritdoc
      */
-    public function getPlatform(): object
+    public function getPlatform(): \Symfony\AI\Platform\PlatformInterface
     {
         return $this->platform;
     }
@@ -364,9 +373,38 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
 
         try {
             return $this->platform->invoke($model, $messageBag, $options);
+        } catch (\Symfony\AI\Platform\Exception\ModelNotFoundException $e) {
+            throw $this->unroutableModel($model, $e);
         } catch (\Throwable $e) {
             throw $this->wrap($e);
         }
+    }
+
+    /**
+     * A model the platform could not route to, reported as a request that never left this server.
+     *
+     * `platform->invoke()` only resolves the model and opens the HTTP request; the provider's reply,
+     * including a 404 for a model it does not serve, is read later when the result is converted. A
+     * `ModelNotFoundException` thrown here therefore always comes from the local router or
+     * catalogue, typically for a model override that is not in the bridge's catalogue. Nothing was
+     * sent or billed, so it must not reach the consumer, or the usage log, as a provider failure.
+     *
+     * @param string $model
+     * @param \Throwable $cause
+     * @return AiRequestNotSentException
+     */
+    private function unroutableModel(string $model, \Throwable $cause): AiRequestNotSentException
+    {
+        return new AiRequestNotSentException(
+            __(
+                'AI service "%1" cannot send a request to model "%2": the client has no route to it. '
+                . 'Configure the service with this model, or leave the "%3" option out.',
+                $this->serviceCode,
+                $model,
+                AiClientInterface::OPTION_MODEL
+            ),
+            $cause instanceof \Exception ? $cause : null
+        );
     }
 
     /**
@@ -408,7 +446,8 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      *
      * @param array<string,mixed> $options
      * @return non-empty-string
-     * @throws AiRequestNotSentException When the caller names a model that is not a usable name
+     * @throws AiRequestNotSentException When the caller names a model that is not a usable name, or
+     *         another model on a bridge that cannot switch models per call
      */
     private function modelFor(array $options): string
     {
@@ -424,6 +463,16 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
                 . 'Leave it out to use the model the service is configured with.',
                 AiClientInterface::OPTION_MODEL,
                 $this->serviceCode
+            ));
+        }
+
+        if ($model !== $this->model && !$this->bridgeRegistry->allowsModelOverride($this->serviceCode)) {
+            throw new AiRequestNotSentException(__(
+                'AI service "%1" sends every call to the model it is configured with, so the "%2" '
+                . 'option cannot switch it to "%3". Configure another "%1" service for that model instead.',
+                $this->serviceCode,
+                AiClientInterface::OPTION_MODEL,
+                $model
             ));
         }
 
@@ -550,10 +599,41 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
                 // by the consumer at runtime and only the provider can rule on it, so the shape is
                 // unprovable here; restating it would reject valid schemas Symfony left out.
                 // @phpstan-ignore argument.type
-                $tool->getParameters(),
+                $this->withObjectProperties($tool->getParameters()),
             ),
             $tools,
         );
+    }
+
+    /**
+     * A JSON Schema whose empty `properties` maps encode as `{}` rather than `[]`.
+     *
+     * PHP has one array type, so a tool that takes no arguments (and every nested object schema
+     * without properties) holds `'properties' => []`, which json_encode writes as a JSON array.
+     * Providers that validate the schema reject that, since `properties` must be an object. The
+     * bridges pass the schema through unchanged, so this is the last place to fix it.
+     *
+     * @param array<mixed> $schema
+     * @return array<mixed>
+     */
+    private function withObjectProperties(array $schema): array
+    {
+        if (array_key_exists('properties', $schema) && is_array($schema['properties'])) {
+            $schema['properties'] = $schema['properties'] === []
+                ? new \stdClass()
+                : array_map(
+                    fn (mixed $property): mixed => is_array($property)
+                        ? $this->withObjectProperties($property)
+                        : $property,
+                    $schema['properties'],
+                );
+        }
+
+        if (isset($schema['items']) && is_array($schema['items'])) {
+            $schema['items'] = $this->withObjectProperties($schema['items']);
+        }
+
+        return $schema;
     }
 
     /**
@@ -863,6 +943,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
      * @param list<\MageOS\AiBase\Api\Data\ToolCallInterface> $toolCalls
      * @param TokenUsageInterface|null $usage
      * @param \Symfony\AI\Platform\Result\DeferredResult $result
+     * @param list<Reasoning> $reasoning Reasoning blocks completed before the cut-off
      * @return ChatResponse
      */
     private function truncatedResponse(
@@ -870,6 +951,7 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
         array $toolCalls,
         ?TokenUsageInterface $usage,
         object $result,
+        array $reasoning = [],
     ): ChatResponse {
         return new ChatResponse(
             $text,
@@ -877,6 +959,36 @@ class SymfonyAiClient implements AiClientInterface, PlatformAwareInterface
             $usage,
             FinishReason::Length,
             $this->extractRawFinishReason($result),
+            $reasoning,
         );
+    }
+
+    /**
+     * The reasoning a stream completed before the provider cut it off at the output token limit.
+     *
+     * The bridge throws `MaxOutputTokensException` at the very end of the stream, after every
+     * thinking event has been converted, and StreamResult's reassembled turn has kept those blocks,
+     * signatures included. Leaving them out of the returned turn would make a tool loop replay it
+     * without the signed reasoning Anthropic requires back (issue #63). Reading the turn is not
+     * worth failing a truncated answer over, so anything going wrong here means no reasoning. It is
+     * logged, though: a turn replayed without it is rejected by the provider on the next request,
+     * and this line is the only trace of why.
+     *
+     * @param \Symfony\AI\Platform\Result\DeferredResult $result
+     * @return list<Reasoning>
+     */
+    private function extractTruncatedStreamReasoning(object $result): array
+    {
+        try {
+            return $this->extractStreamedReasoning($result);
+        } catch (\Throwable $failure) {
+            $this->logger->warning(
+                'AI client: the reasoning of a truncated stream could not be read, the turn is returned without it: '
+                    . $failure->getMessage(),
+                ['exception' => $failure, 'service_id' => $this->serviceId, 'model' => $this->model],
+            );
+
+            return [];
+        }
     }
 }

@@ -12,6 +12,11 @@ use Magento\Framework\Exception\LocalizedException;
  * Implement this alongside {@see \MageOS\AiBase\Api\Data\AiServiceConfigurationInterface} to enable
  * the "Refresh Models" action in the admin form. Backends that cannot enumerate models (or whose
  * listing endpoint needs configuration this module does not collect) simply do not implement it.
+ *
+ * An optional capability a provider opts into next to {@see Data\AiServiceConfigurationInterface}.
+ * Its methods do not change within a major version; a new capability gets a new interface.
+ *
+ * @api
  */
 interface ModelListProviderInterface
 {

@@ -9,8 +9,17 @@ namespace MageOS\AiBase\Api\Data;
  *
  * Every count is nullable: providers differ in what they report, and streaming responses only
  * carry the completion count once the stream ends.
+ *
+ * Serializes to an object with `prompt_tokens`, `completion_tokens`, `total_tokens`,
+ * `cache_read_tokens`, `cache_write_tokens` and `reasoning_tokens`, each an int or null; the JSON
+ * keys are part of this interface's contract.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
-interface TokenUsageInterface
+interface TokenUsageInterface extends \JsonSerializable
 {
     /**
      * Tokens consumed by the prompt.

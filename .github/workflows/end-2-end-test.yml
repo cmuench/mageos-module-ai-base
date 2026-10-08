@@ -13,8 +13,14 @@ jobs:
   # The full cross-product of platform, PHP version and mode is twelve jobs of half an hour, and
   # the extra jobs re-run a suite that does not touch the PHP version at all. The combinations
   # below are chosen instead: each platform is seen in both modes, and the PHP floor, the middle
-  # and the newest release each appear at least once. Bump the PLATFORM and PHP_VERSION values
-  # when a new Magento, Mage-OS or PHP release is added to magento2-in-a-box.
+  # and the newest release each appear at least once. The newest combinations use the `latest`
+  # tag and follow new releases by themselves; bump the pinned TAG values when a new Magento,
+  # Mage-OS or PHP release is added to magento2-in-a-box.
+  #
+  # The first entry is the oldest Magento composer.json allows: 2.4.8 (framework 103.0.8). It
+  # runs on PHP 8.3 because magento2-in-a-box has no PHP 8.2 image for 2.4.8; the check-extension
+  # workflow covers 2.4.8 on PHP 8.2. Raise it together with the magento/framework constraint,
+  # never on its own.
   e2e-tests:
     name: E2E (${{ matrix.PLATFORM }}, ${{ matrix.PHP_VERSION }}, ${{ matrix.MAGENTO_MODE }})
     runs-on: ubuntu-latest
@@ -22,25 +28,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - PLATFORM: magento2.4.8
+            IMAGE: magento-project-community-edition
+            PHP_VERSION: php83-fpm
+            TAG: php83-fpm-magento2.4.8
+            MAGENTO_MODE: production
           - PLATFORM: magento2.4.9
             IMAGE: magento-project-community-edition
             PHP_VERSION: php83-fpm
+            TAG: php83-fpm-magento2.4.9
             MAGENTO_MODE: production
           - PLATFORM: magento2.4.9
             IMAGE: magento-project-community-edition
             PHP_VERSION: php84-fpm
+            TAG: php84-fpm-magento2.4.9
             MAGENTO_MODE: developer
-          - PLATFORM: magento2.4.9
+          # `latest` is the newest Magento release on the newest PHP version magento2-in-a-box
+          # builds, so this entry moves forward on its own when either is released.
+          - PLATFORM: magento-latest
             IMAGE: magento-project-community-edition
-            PHP_VERSION: php85-fpm
+            PHP_VERSION: newest-php
+            TAG: latest
             MAGENTO_MODE: production
-          - PLATFORM: mage-os3.4.0
+          - PLATFORM: mage-os3.5.0
             IMAGE: mage-os-community-edition
             PHP_VERSION: php83-fpm
+            TAG: php83-fpm-mage-os3.5.0
             MAGENTO_MODE: developer
-          - PLATFORM: mage-os3.4.0
+          # The newest Mage-OS release on the newest PHP version, the same way.
+          - PLATFORM: mage-os-latest
             IMAGE: mage-os-community-edition
-            PHP_VERSION: php85-fpm
+            PHP_VERSION: newest-php
+            TAG: latest
             MAGENTO_MODE: production
     env:
       MAGENTO_MODE: ${{ matrix.MAGENTO_MODE }}
@@ -69,7 +88,7 @@ jobs:
           docker run -d --name store \
             -p 80:80 \
             -v "$(pwd)/magento-logs:/data/var/log" \
-            ghcr.io/controlaltdelete-nl/magento2-in-a-box/${{ matrix.IMAGE }}:${{ matrix.PHP_VERSION }}-${{ matrix.PLATFORM }}
+            ghcr.io/controlaltdelete-nl/magento2-in-a-box/${{ matrix.IMAGE }}:${{ matrix.TAG }}
 
       - name: Upload the module into the container
         run: |
@@ -81,13 +100,6 @@ jobs:
         run: |
           docker exec store ./retry "php bin/magento module:enable MageOS_AiBase"
           docker exec store ./retry "php bin/magento setup:upgrade --no-interaction --keep-generated"
-
-      # symfony/ai-platform is a suggest, so nothing installs it for us. Two bridges are enough to
-      # give the form both states it can be in: providers that work, and providers that do not.
-      - name: Install two provider bridges
-        run: |
-          docker exec store ./install-composer-package \
-            symfony/ai-anthropic-platform symfony/ai-open-ai-platform
 
       # Magento Open Source ships PayPal_Braintree, whose admin script runs on every configuration
       # section and, on 2.4.9, intermittently throws "locations.each is not a function"

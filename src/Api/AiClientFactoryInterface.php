@@ -8,6 +8,12 @@ use Magento\Framework\Exception\LocalizedException;
 
 /**
  * Creates ready-to-use AI clients from the services configured in the admin.
+ *
+ * Stable to call. Methods may be added in a minor release, so a store that replaces the client
+ * stack through a `<preference>` has to add them too; to change what it does without taking that
+ * on, write a plugin on it instead.
+ *
+ * @api
  */
 interface AiClientFactoryInterface
 {
@@ -31,8 +37,8 @@ interface AiClientFactoryInterface
      * @param string|null $serviceCode
      * @param string|null $consumer
      * @return AiClientInterface
-     * @throws LocalizedException When no matching service is configured or the
-     *         underlying client library is not installed
+     * @throws LocalizedException When no matching service is configured or the provider's
+     *         Symfony AI bridge is not installed
      */
     public function create(?string $serviceCode = null, ?string $consumer = null): AiClientInterface;
 
@@ -49,8 +55,8 @@ interface AiClientFactoryInterface
      * @param string $serviceId
      * @param string|null $consumer
      * @return AiClientInterface
-     * @throws LocalizedException When no row carries that id, or the underlying client library
-     *         is not installed
+     * @throws LocalizedException When no row carries that id, or the provider's Symfony AI
+     *         bridge is not installed
      */
     public function createById(string $serviceId, ?string $consumer = null): AiClientInterface;
 }

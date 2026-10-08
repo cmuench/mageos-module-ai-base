@@ -9,6 +9,11 @@ namespace MageOS\AiBase\Api\Data;
  *
  * Immutable: a tool loop appends to the conversation on every iteration, and mutating in place
  * would let one iteration's bookkeeping leak into a request the caller still holds.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface ChatRequestInterface
 {

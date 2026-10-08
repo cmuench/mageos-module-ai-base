@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\Config\Source;
 
+use Magento\Framework\App\RequestInterface;
 use Magento\Framework\Data\OptionSourceInterface;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\ServiceScope;
 
 /**
  * Option source listing the AI services an administrator has configured, for reuse in the
@@ -26,6 +29,14 @@ use MageOS\AiBase\Model\ServiceRegistry;
  * Every configured row is listed, including ones the bundled client cannot currently use. Modules
  * that call a provider with their own HTTP client do not need a bridge at all, so hiding those
  * rows would hide legitimate choices; instead the label says what is wrong with them.
+ *
+ * Scope: on the config edit page the rows listed are those of the scope being edited, read from the
+ * page's `website` or `store` parameter, because a value saved for a website is resolved at runtime
+ * against that website's services, and listing default's rows there offered ids the website may not
+ * have. Without either parameter (default scope, or a page that is not a config edit page) the
+ * selector's ambient scope answers, as it always did. A field saved on a website while a store view
+ * below it overrides the services list is still offered the website's rows: one dropdown cannot show
+ * every store view's list at once.
  */
 class ConfiguredService implements OptionSourceInterface
 {
@@ -38,11 +49,17 @@ class ConfiguredService implements OptionSourceInterface
      * @param AiServiceSelectorInterface $serviceSelector
      * @param ServiceRegistry $serviceRegistry
      * @param BridgeRegistry $bridgeRegistry
+     * @param RequestInterface $request The config edit request, which names the scope being edited
+     * @param ConfigScopeResolver $scopeResolver
+     * @param ServiceScope $serviceScope
      */
     public function __construct(
         private readonly AiServiceSelectorInterface $serviceSelector,
         private readonly ServiceRegistry $serviceRegistry,
         private readonly BridgeRegistry $bridgeRegistry,
+        private readonly RequestInterface $request,
+        private readonly ConfigScopeResolver $scopeResolver,
+        private readonly ServiceScope $serviceScope,
     ) {
     }
 
@@ -58,8 +75,23 @@ class ConfiguredService implements OptionSourceInterface
                 'value' => $service->getId(),
                 'label' => $this->getLabel($service),
             ],
-            $this->serviceSelector->getAll(),
+            $this->getConfiguredServices(),
         ));
+    }
+
+    /**
+     * The configured rows of the scope being edited, or of the ambient scope when none is named.
+     *
+     * @return list<AiServiceInterface>
+     */
+    private function getConfiguredServices(): array
+    {
+        $scope = $this->scopeResolver->fromRequest($this->request);
+        if ($scope->isDefault()) {
+            return $this->serviceSelector->getAll();
+        }
+
+        return $this->serviceScope->run($scope, fn (): array => $this->serviceSelector->getAll());
     }
 
     /**

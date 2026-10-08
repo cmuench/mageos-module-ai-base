@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
+
+use MageOS\AiBase\Model\Client\AiExceptionMapper;
 
 /**
  * The provider rejected the configured credentials: an expired key, a revoked one, or one that
@@ -12,6 +14,8 @@ namespace MageOS\AiBase\Model\Client;
  * configured service before another call can succeed. {@see AiExceptionMapper} builds this from
  * symfony/ai's `AuthenticationException`, which every bridge routed through
  * `HttpStatusErrorHandlingTrait` reports on a 401.
+ *
+ * @api
  */
 class AiAuthenticationException extends AiServiceException
 {

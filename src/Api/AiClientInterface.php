@@ -13,6 +13,12 @@ use MageOS\AiBase\Api\Data\ChatResponseInterface;
  *
  * Consumer modules should depend on this interface instead of talking to
  * provider APIs or raw configuration directly.
+ *
+ * Stable to call. Methods may be added in a minor release, so a store that replaces the client
+ * stack through a `<preference>` has to add them too; to change what it does without taking that
+ * on, write a plugin on it instead.
+ *
+ * @api
  */
 interface AiClientInterface
 {
@@ -27,6 +33,8 @@ interface AiClientInterface
      *
      * Leave it out to use the configured model. A consumer that does not know which provider an
      * administrator picked should leave it out, since a model name is only valid at one provider.
+     * Azure routes every call to its configured deployment, so there an override to another model
+     * throws {@see \MageOS\AiBase\Exceptions\AiRequestNotSentException}.
      */
     public const OPTION_MODEL = 'model';
 
@@ -85,8 +93,9 @@ interface AiClientInterface
      *
      * When the provider breaks mid-stream, the tokens produced so far are already billed. This
      * generator yields one final usage StreamChunkInterface built from what the platform reported
-     * before the failure, then rethrows the original exception unchanged. A caller that stops
-     * iterating on that chunk without letting the loop run to exhaustion never sees the exception.
+     * before the failure, then throws the failure mapped onto this module's typed exceptions, the
+     * same ones chat() throws (see the Exceptions namespace). A caller that stops iterating on
+     * that chunk without letting the loop run to exhaustion never sees the exception.
      *
      * @param ChatRequestInterface $request
      * @param array<string,mixed> $options Provider options (e.g. temperature, max_tokens), plus

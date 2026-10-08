@@ -5,14 +5,12 @@ declare(strict_types=1);
 namespace MageOS\AiBase\AiServices;
 
 use Magento\Framework\Exception\LocalizedException;
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\ModelList\HttpFetcher;
 
-class Ollama implements AiServiceConfigurationInterface, ModelListProviderInterface
+class Ollama extends AbstractAiService implements ModelListProviderInterface
 {
-    use FieldFactoryTrait;
     use ModelListTrait;
 
     /**
@@ -22,12 +20,13 @@ class Ollama implements AiServiceConfigurationInterface, ModelListProviderInterf
 
     /**
      * @param FieldDescriptorInterfaceFactory $fieldFactory
-     * @param HttpFetcher $modelListFetcher
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-        private readonly HttpFetcher $modelListFetcher,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
@@ -60,8 +59,8 @@ class Ollama implements AiServiceConfigurationInterface, ModelListProviderInterf
     public function getConfigurationFields(): array
     {
         return [
-            $this->baseUrlField($this->fieldFactory, self::DEFAULT_BASE_URL),
-            $this->freeTextModelField($this->fieldFactory),
+            $this->baseUrlField(self::DEFAULT_BASE_URL),
+            $this->freeTextModelField(),
         ];
     }
 
@@ -88,5 +87,16 @@ class Ollama implements AiServiceConfigurationInterface, ModelListProviderInterf
         }
 
         return $models;
+    }
+
+    /**
+     * The base URL alone: a local runtime's bridge factory takes its endpoint first and no API key.
+     *
+     * @param array<string,mixed> $configuration
+     * @return list<mixed>
+     */
+    public function getPlatformArguments(array $configuration): array
+    {
+        return [$this->resolveBaseUrl($configuration, self::DEFAULT_BASE_URL)];
     }
 }

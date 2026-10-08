@@ -10,6 +10,8 @@ namespace MageOS\AiBase\Api\Data;
  * The four roles every supported provider models, whatever it calls them on the wire. Tool
  * results are their own role rather than a user message, because a provider needs to pair them
  * with the call that produced them.
+ *
+ * @api
  */
 enum MessageRole: string
 {

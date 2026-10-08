@@ -12,6 +12,11 @@ namespace MageOS\AiBase\Api\Data;
  * encrypted `reasoning` item that must be replayed as-is, and Gemini attaches a `thoughtSignature`
  * it checks the same way. The signature is opaque to this module: it is never inspected, edited or
  * rendered, only carried. A consumer that stores the transcript stores it as received.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface ReasoningInterface
 {

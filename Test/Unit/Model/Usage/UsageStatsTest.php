@@ -8,8 +8,9 @@ use MageOS\AiBase\Api\Data\Granularity;
 use MageOS\AiBase\Api\UsageStatsInterface;
 use MageOS\AiBase\Api\Data\Period;
 use MageOS\AiBase\Api\Data\UsageBreakdownInterface;
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
 use MageOS\AiBase\Model\Usage\UsageStats;
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
@@ -19,23 +20,24 @@ use PHPUnit\Framework\TestCase;
  * @covers \MageOS\AiBase\Model\Usage\UsageStats
  *
  * Exercises {@see UsageStats} against {@see FakeRawUsageRepository} and
- * {@see FakeDailyUsageRepository}, in-memory stand-ins for the two repositories it merges, per
+ * {@see FakeDailyUsageReport}, in-memory stand-ins for the two tables it merges, per
  * this codebase's fakes-over-mocks convention. The union across a real database is proven
  * separately by `Test/Integration/Model/Usage/UsageStatsTest.php`.
  */
 final class UsageStatsTest extends TestCase
 {
     private FakeRawUsageRepository $rawUsageRepository;
-    private FakeDailyUsageRepository $dailyUsageRepository;
+    private FakeDailyUsageReport $dailyUsageReport;
     private UsageStats $subject;
 
     protected function setUp(): void
     {
         $this->rawUsageRepository = new FakeRawUsageRepository();
-        $this->dailyUsageRepository = new FakeDailyUsageRepository();
+        $this->dailyUsageReport = new FakeDailyUsageReport();
         $this->subject = new UsageStats(
             $this->rawUsageRepository,
-            $this->dailyUsageRepository,
+            $this->rawUsageRepository,
+            $this->dailyUsageReport,
             new FakeStatsTimezone('UTC')
         );
     }
@@ -53,8 +55,8 @@ final class UsageStatsTest extends TestCase
     public function test_it_totals_token_counts_for_a_period_covered_entirely_by_daily_rows(): void
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-06-01 00:00:00', 'total_tokens' => 999]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 15]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-20', 'total_tokens' => 30]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 15]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-20', 'total_tokens' => 30]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-02-01 00:00:00'));
 
@@ -65,8 +67,8 @@ final class UsageStatsTest extends TestCase
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-02-15 08:00:00', 'total_tokens' => 100]));
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-02-20 00:00:00', 'total_tokens' => 50]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 10]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-02-15', 'total_tokens' => 999]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 10]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-02-15', 'total_tokens' => 999]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-03-01 00:00:00'));
 
@@ -78,7 +80,7 @@ final class UsageStatsTest extends TestCase
         $this->rawUsageRepository->addRow(
             $this->rawRow(['created_at' => '2026-01-10 00:00:00', 'consumer' => 'chat', 'total_tokens' => 15])
         );
-        $this->dailyUsageRepository->addRow(
+        $this->dailyUsageReport->addRow(
             $this->dailyRow(['usage_date' => '2026-01-05', 'consumer' => 'docs_search', 'total_tokens' => 150])
         );
 
@@ -93,7 +95,7 @@ final class UsageStatsTest extends TestCase
         $this->rawUsageRepository->addRow(
             $this->rawRow(['created_at' => '2026-01-10 00:00:00', 'service_id' => '_row1', 'total_tokens' => 15])
         );
-        $this->dailyUsageRepository->addRow(
+        $this->dailyUsageReport->addRow(
             $this->dailyRow(['usage_date' => '2026-01-05', 'service_id' => '_row2', 'total_tokens' => 150])
         );
 
@@ -105,8 +107,8 @@ final class UsageStatsTest extends TestCase
 
     public function test_it_returns_a_daily_time_series_across_the_period(): void
     {
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-07', 'total_tokens' => 20]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-07', 'total_tokens' => 20]));
 
         $series = $this->subject->getTimeSeries(
             $this->period('2026-01-05 00:00:00', '2026-01-08 00:00:00'),
@@ -120,8 +122,8 @@ final class UsageStatsTest extends TestCase
 
     public function test_it_returns_a_monthly_time_series_across_the_period(): void
     {
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-02-05', 'total_tokens' => 20]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-02-05', 'total_tokens' => 20]));
 
         $series = $this->subject->getTimeSeries(
             $this->period('2026-01-01 00:00:00', '2026-03-01 00:00:00'),
@@ -149,8 +151,8 @@ final class UsageStatsTest extends TestCase
 
     public function test_it_fills_gaps_in_a_time_series_with_zero_rather_than_skipping_the_day(): void
     {
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-07', 'total_tokens' => 20]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-07', 'total_tokens' => 20]));
 
         $series = $this->subject->getTimeSeries(
             $this->period('2026-01-05 00:00:00', '2026-01-08 00:00:00'),
@@ -167,7 +169,7 @@ final class UsageStatsTest extends TestCase
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-01-10 00:00:00']));
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-01-11 00:00:00']));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2025-12-01', 'calls' => 4]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2025-12-01', 'calls' => 4]));
         $this->rawUsageRepository->setOldestOverride('2026-01-10 00:00:00');
 
         $totals = $this->subject->getTotals($this->period('2025-12-01 00:00:00', '2026-02-01 00:00:00'));
@@ -177,8 +179,8 @@ final class UsageStatsTest extends TestCase
 
     public function test_it_reads_everything_from_the_daily_table_when_the_raw_table_is_empty(): void
     {
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 15]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-20', 'total_tokens' => 30]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'total_tokens' => 15]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-20', 'total_tokens' => 30]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-02-01 00:00:00'));
 
@@ -204,7 +206,7 @@ final class UsageStatsTest extends TestCase
     public function test_it_aligns_the_raw_and_daily_halves_of_a_series_that_spans_both_tables(): void
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-01-20 08:00:00', 'total_tokens' => 25]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-05', 'total_tokens' => 10]));
         $this->rawUsageRepository->setOldestOverride('2026-01-20 00:00:00');
 
         $series = $this->subject->getTimeSeries(
@@ -235,7 +237,7 @@ final class UsageStatsTest extends TestCase
     public function test_it_merges_failed_calls_across_raw_and_daily_rows(): void
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-02-15 08:00:00', 'failed_calls' => 1]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'failed_calls' => 2]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-10', 'failed_calls' => 2]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-03-01 00:00:00'));
 
@@ -257,7 +259,7 @@ final class UsageStatsTest extends TestCase
     public function test_it_keeps_cache_totals_null_when_neither_table_reported_them(): void
     {
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-02-15 08:00:00']));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-10']));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-10']));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-03-01 00:00:00'));
 
@@ -374,7 +376,8 @@ final class UsageStatsTest extends TestCase
     {
         $subject = new UsageStats(
             $this->rawUsageRepository,
-            $this->dailyUsageRepository,
+            $this->rawUsageRepository,
+            $this->dailyUsageReport,
             new FakeStatsTimezone('Europe/Amsterdam')
         );
 
@@ -383,7 +386,21 @@ final class UsageStatsTest extends TestCase
         // sweep in the previous December's bucket.
         $subject->getTotals($this->period('2025-12-31 23:00:00', '2026-12-31 23:00:00'));
 
-        self::assertSame('2026-01-01', $this->dailyUsageRepository->lastSumFrom());
+        self::assertSame('2026-01-01', $this->dailyUsageReport->lastSumFrom());
+    }
+
+    public function test_it_asks_the_daily_table_for_dates_in_the_default_scope_timezone(): void
+    {
+        $subject = new UsageStats(
+            $this->rawUsageRepository,
+            $this->rawUsageRepository,
+            $this->dailyUsageReport,
+            new FakeStatsTimezone('Europe/Amsterdam', 'America/New_York')
+        );
+
+        $subject->getTotals($this->period('2025-12-31 23:00:00', '2026-12-31 23:00:00'));
+
+        self::assertSame('2026-01-01', $this->dailyUsageReport->lastSumFrom());
     }
 
     public function test_it_returns_one_dense_series_per_consumer(): void
@@ -460,9 +477,9 @@ final class UsageStatsTest extends TestCase
         // rows, so the end day counts in full rather than being dropped: dropping it made flat
         // usage read as a large increase.
         $this->rawUsageRepository->setOldestOverride('2026-01-04 00:00:00');
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-01', 'total_tokens' => 1000]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-02', 'total_tokens' => 1000]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-03', 'total_tokens' => 1000]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-01', 'total_tokens' => 1000]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-02', 'total_tokens' => 1000]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-03', 'total_tokens' => 1000]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-01-03 20:00:00'));
 
@@ -475,8 +492,8 @@ final class UsageStatsTest extends TestCase
         // oldest raw row is answered from the raw side alone, or it would be counted twice.
         $this->rawUsageRepository->setOldestOverride('2026-01-03 09:15:00');
         $this->rawUsageRepository->addRow($this->rawRow(['created_at' => '2026-01-03 09:15:00', 'total_tokens' => 7]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-01', 'total_tokens' => 1000]));
-        $this->dailyUsageRepository->addRow($this->dailyRow(['usage_date' => '2026-01-03', 'total_tokens' => 9999]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-01', 'total_tokens' => 1000]));
+        $this->dailyUsageReport->addRow($this->dailyRow(['usage_date' => '2026-01-03', 'total_tokens' => 9999]));
 
         $totals = $this->subject->getTotals($this->period('2026-01-01 00:00:00', '2026-01-03 20:00:00'));
 
@@ -521,10 +538,10 @@ final class UsageStatsTest extends TestCase
         $this->rawUsageRepository->addRow($this->rawRow([
             'created_at' => '2026-02-15 09:00:00', 'store_id' => 2, 'total_tokens' => 700,
         ]));
-        $this->dailyUsageRepository->addRow($this->dailyRow([
+        $this->dailyUsageReport->addRow($this->dailyRow([
             'usage_date' => '2026-01-10', 'store_id' => 1, 'total_tokens' => 10,
         ]));
-        $this->dailyUsageRepository->addRow($this->dailyRow([
+        $this->dailyUsageReport->addRow($this->dailyRow([
             'usage_date' => '2026-01-11', 'store_id' => 2, 'total_tokens' => 900,
         ]));
 
@@ -606,11 +623,12 @@ final class UsageStatsTest extends TestCase
 
         self::assertSame(['chat'], array_keys($series));
     }
-
 }
 
 /**
- * In-memory stand-in for {@see UsageRecordRepositoryInterface}. Rows are added directly through
+ * In-memory stand-in for {@see UsageRecordRepositoryInterface} and
+ * {@see UsageRecordReportInterface}, the two contracts the real raw-log repository implements and
+ * {@see UsageStats} receives separately; a test passes the same instance for both. Rows are added directly through
  * {@see addRow()} with an explicit `created_at` string, giving a test full control over historical
  * timestamps the real repository would leave to the database.
  *
@@ -618,7 +636,7 @@ final class UsageStatsTest extends TestCase
  * not exercised by {@see UsageStats} and throw, so a test that accidentally depends on one of them
  * fails loudly instead of silently returning a meaningless default.
  */
-final class FakeRawUsageRepository implements UsageRecordRepositoryInterface
+final class FakeRawUsageRepository implements UsageRecordRepositoryInterface, UsageRecordReportInterface
 {
     /**
      * @var array<int,array<string,int|string|null>>
@@ -751,7 +769,7 @@ final class FakeRawUsageRepository implements UsageRecordRepositoryInterface
         string $granularity,
         ?int $storeId = null
     ): array {
-        $isMonthly = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH;
+        $isMonthly = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH;
         $labelFormat = $isMonthly ? 'Y-m' : 'Y-m-d';
         $stepModifier = $isMonthly ? '+1 month' : '+1 day';
 
@@ -839,7 +857,7 @@ final class FakeRawUsageRepository implements UsageRecordRepositoryInterface
         string $groupBy,
         ?int $storeId = null
     ): array {
-        $isMonthly = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH;
+        $isMonthly = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH;
         $labelFormat = $isMonthly ? 'Y-m' : 'Y-m-d';
         $stepModifier = $isMonthly ? '+1 month' : '+1 day';
 
@@ -869,14 +887,11 @@ final class FakeRawUsageRepository implements UsageRecordRepositoryInterface
 }
 
 /**
- * In-memory stand-in for {@see UsageDailyRepositoryInterface}. Window filtering compares
+ * In-memory stand-in for {@see UsageDailyReportInterface}. Window filtering compares
  * `usage_date` strings the same way {@see \MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily}
  * does: only the date portion of `$from`/`$to` is read, never the time.
- *
- * `getList()`, `saveAggregates()` and `deleteOlderThan()` are not exercised by {@see UsageStats}
- * and throw.
  */
-final class FakeDailyUsageRepository implements UsageDailyRepositoryInterface
+final class FakeDailyUsageReport implements UsageDailyReportInterface
 {
     private ?string $lastSumFrom = null;
 
@@ -900,21 +915,6 @@ final class FakeDailyUsageRepository implements UsageDailyRepositoryInterface
     public function addRow(array $row): void
     {
         $this->rows[] = $row;
-    }
-
-    public function saveAggregates(array $rows): void
-    {
-        throw new \LogicException('Not needed by UsageStatsTest.');
-    }
-
-    public function getList(SearchCriteriaInterface $searchCriteria): SearchResultsInterface
-    {
-        throw new \LogicException('Not needed by UsageStatsTest.');
-    }
-
-    public function deleteOlderThan(\DateTimeInterface $cutoff): int
-    {
-        throw new \LogicException('Not needed by UsageStatsTest.');
     }
 
     public function sumRange(
@@ -965,7 +965,7 @@ final class FakeDailyUsageRepository implements UsageDailyRepositoryInterface
     ): array {
         $buckets = [];
         foreach ($this->rowsInWindow($from, $to, $storeId) as $row) {
-            $period = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            $period = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH
                 ? substr((string) $row['usage_date'], 0, 7)
                 : (string) $row['usage_date'];
             $buckets[$period][] = $row;
@@ -1045,7 +1045,7 @@ final class FakeDailyUsageRepository implements UsageDailyRepositoryInterface
         string $groupBy,
         ?int $storeId = null
     ): array {
-        $isMonthly = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH;
+        $isMonthly = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH;
         $labelFormat = $isMonthly ? 'Y-m' : 'Y-m-d';
 
         $grouped = [];
@@ -1071,13 +1071,25 @@ final class FakeDailyUsageRepository implements UsageDailyRepositoryInterface
  */
 final class FakeStatsTimezone implements \Magento\Framework\Stdlib\DateTime\TimezoneInterface
 {
-    public function __construct(private readonly string $timezone)
-    {
+    /**
+     * @param string $timezone What Default Config answers: the reporting timezone.
+     * @param string|null $ambientStoreTimezone What any other scope answers, standing in for a
+     *        store view with its own timezone, so a test can prove the subject asks for Default
+     *        Config explicitly; null answers $timezone for every scope.
+     */
+    public function __construct(
+        private readonly string $timezone,
+        private readonly ?string $ambientStoreTimezone = null,
+    ) {
     }
 
     public function getConfigTimezone($scopeType = null, $scopeCode = null)
     {
-        return $this->timezone;
+        if ($scopeType === \Magento\Framework\App\Config\ScopeConfigInterface::SCOPE_TYPE_DEFAULT) {
+            return $this->timezone;
+        }
+
+        return $this->ambientStoreTimezone ?? $this->timezone;
     }
 
     public function getDefaultTimezonePath()

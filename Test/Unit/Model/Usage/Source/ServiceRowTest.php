@@ -9,11 +9,13 @@ use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Model\AiService;
 use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Api\Data\AiServiceInterface;
+use MageOS\AiBase\Model\Usage\ServiceRowLabels;
 use MageOS\AiBase\Model\Usage\Source\ServiceRow;
 use PHPUnit\Framework\TestCase;
 
 /**
  * @covers \MageOS\AiBase\Model\Usage\Source\ServiceRow
+ * @covers \MageOS\AiBase\Model\Usage\ServiceRowLabels
  */
 final class ServiceRowTest extends TestCase
 {
@@ -32,8 +34,7 @@ final class ServiceRowTest extends TestCase
     {
         $this->serviceSelector->withServices([new AiService('_row_a', 'openai', [])]);
 
-        $options = (new ServiceRow($this->serviceSelector, $this->registry(['openai' => 'OpenAI'])))
-            ->toOptionArray();
+        $options = $this->subject(['openai' => 'OpenAI'])->toOptionArray();
 
         self::assertSame('_row_a', $options[0]['value']);
         self::assertSame('OpenAI', (string) $options[0]['label']);
@@ -47,9 +48,64 @@ final class ServiceRowTest extends TestCase
     {
         $this->serviceSelector->withServices([new AiService('_row_a', 'long_gone', [])]);
 
-        $options = (new ServiceRow($this->serviceSelector, $this->registry([])))->toOptionArray();
+        $options = $this->subject([])->toOptionArray();
 
         self::assertSame('long_gone', (string) $options[0]['label']);
+    }
+
+    public function test_it_labels_a_service_row_with_the_name_it_was_given(): void
+    {
+        $this->serviceSelector->withServices([
+            new AiService('_row_a', 'anthropic', [AiServiceInterface::CONFIGURATION_LABEL => 'Chat AI']),
+        ]);
+
+        $options = $this->subject(['anthropic' => 'Anthropic'])->toOptionArray();
+
+        self::assertSame('Chat AI', $options[0]['label']);
+    }
+
+    public function test_it_offers_two_named_rows_of_the_same_provider_as_two_distinct_options(): void
+    {
+        $this->serviceSelector->withServices([
+            new AiService('_row_a', 'anthropic', [AiServiceInterface::CONFIGURATION_LABEL => 'Chat AI']),
+            new AiService('_row_b', 'anthropic', [AiServiceInterface::CONFIGURATION_LABEL => 'Summaries']),
+        ]);
+
+        $options = $this->subject(['anthropic' => 'Anthropic'])->toOptionArray();
+
+        self::assertSame(
+            [['value' => '_row_a', 'label' => 'Chat AI'], ['value' => '_row_b', 'label' => 'Summaries']],
+            $options
+        );
+    }
+
+    public function test_it_appends_the_row_id_when_two_rows_would_read_the_same(): void
+    {
+        $this->serviceSelector->withServices([
+            new AiService('_row_a', 'anthropic', []),
+            new AiService('_row_b', 'anthropic', []),
+        ]);
+
+        $options = $this->subject(['anthropic' => 'Anthropic'])->toOptionArray();
+
+        self::assertSame(['Anthropic (_row_a)', 'Anthropic (_row_b)'], array_column($options, 'label'));
+    }
+
+    public function test_it_offers_a_numeric_row_id_as_a_string_value(): void
+    {
+        $this->serviceSelector->withServices([new AiService('12', 'openai', [])]);
+
+        $options = $this->subject(['openai' => 'OpenAI'])->toOptionArray();
+
+        self::assertSame('12', $options[0]['value']);
+    }
+
+    /**
+     * @param array<string,string> $names Service code => display name
+     */
+    private function subject(array $names): ServiceRow
+    {
+        return new ServiceRow(new ServiceRowLabels($this->serviceSelector, $this->registry($names)));
     }
 
     /**

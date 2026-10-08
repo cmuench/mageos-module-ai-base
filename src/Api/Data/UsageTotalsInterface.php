@@ -11,6 +11,11 @@ namespace MageOS\AiBase\Api\Data;
  * shape every {@see UsageBreakdownInterface} carries per group: one grand total or one row per
  * consumer/service/bucket is the same set of numbers, so there is one interface for both rather
  * than two that would only ever say the same thing.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface UsageTotalsInterface
 {

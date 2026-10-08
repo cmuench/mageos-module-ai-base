@@ -80,4 +80,21 @@ class TokenUsage implements TokenUsageInterface
     {
         return $this->reasoningTokens;
     }
+
+    /**
+     * Every count as JSON, null where the provider reported none.
+     *
+     * @return array<string, int|null>
+     */
+    public function jsonSerialize(): array
+    {
+        return [
+            'prompt_tokens' => $this->getPromptTokens(),
+            'completion_tokens' => $this->getCompletionTokens(),
+            'total_tokens' => $this->getTotalTokens(),
+            'cache_read_tokens' => $this->getCacheReadTokens(),
+            'cache_write_tokens' => $this->getCacheWriteTokens(),
+            'reasoning_tokens' => $this->getReasoningTokens(),
+        ];
+    }
 }

@@ -7,7 +7,7 @@ namespace MageOS\AiBase\Test\Integration\Model\Usage;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\ObjectManagerInterface;
 use Magento\TestFramework\Helper\Bootstrap;
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily;
 use PHPUnit\Framework\TestCase;
 
@@ -17,9 +17,10 @@ use PHPUnit\Framework\TestCase;
  * This is the counterpart the class docblock on
  * {@see \MageOS\AiBase\Test\Unit\Model\Usage\UsageDailyRepositoryTest} points to: that suite's
  * fake mirrors MySQL's insert-on-duplicate semantics closely enough to drive the repository's own
- * tests, but only a real database can prove the fake's mirroring is actually correct — in
- * particular that saving the same aggregates twice really does leave one row with unchanged
- * totals, which is MySQL's behaviour, not PHP's.
+ * tests, but only a real database can prove the fake's mirroring is actually correct: in
+ * particular that a second write for the same grouping key adds to the stored row, and that the
+ * nullable token counts keep null meaning "nobody reported this" through that addition, which is
+ * MySQL's behaviour, not PHP's.
  */
 final class UsageDailyTest extends TestCase
 {
@@ -53,15 +54,45 @@ final class UsageDailyTest extends TestCase
         self::assertSame(15, (int) $stored[0]['total_tokens']);
     }
 
-    public function test_it_replaces_the_counts_of_an_existing_row_for_the_same_day_and_grouping_key(): void
+    /**
+     * The requirement the additive upsert exists for: raw rows are deleted once rolled up, so a
+     * second roll-up of the same day only ever carries the rows that arrived since. MySQL's unique
+     * key on (`usage_date`, `service_id`, `model`, `consumer`, `store_id`) is what makes that second
+     * write match the stored row and add to it instead of inserting a duplicate or writing a partial
+     * total over a complete one. No fake can prove this; it is MySQL's behaviour.
+     */
+    public function test_it_adds_the_counts_to_an_existing_row_for_the_same_day_and_grouping_key(): void
     {
-        $this->resource->upsertAggregates([$this->row(['calls' => 3, 'total_tokens' => 300])]);
-        $this->resource->upsertAggregates([$this->row(['calls' => 7, 'total_tokens' => 700])]);
+        $this->resource->upsertAggregates([$this->row([
+            'calls' => 3,
+            'failed_calls' => 1,
+            'input_tokens' => 200,
+            'output_tokens' => 100,
+            'total_tokens' => 300,
+        ])]);
+        $this->resource->upsertAggregates([$this->row([
+            'calls' => 7,
+            'failed_calls' => 2,
+            'input_tokens' => 500,
+            'output_tokens' => 200,
+            'total_tokens' => 700,
+        ])]);
 
         $stored = $this->fetchAllRows();
         self::assertCount(1, $stored);
-        self::assertSame(7, (int) $stored[0]['calls']);
-        self::assertSame(700, (int) $stored[0]['total_tokens']);
+        self::assertSame(10, (int) $stored[0]['calls']);
+        self::assertSame(3, (int) $stored[0]['failed_calls']);
+        self::assertSame(700, (int) $stored[0]['input_tokens']);
+        self::assertSame(300, (int) $stored[0]['output_tokens']);
+        self::assertSame(1000, (int) $stored[0]['total_tokens']);
+    }
+
+    public function test_it_keeps_the_latest_service_code_when_adding_to_an_existing_row(): void
+    {
+        $this->resource->upsertAggregates([$this->row(['service_code' => 'anthropic'])]);
+        $this->resource->upsertAggregates([$this->row(['service_code' => 'openai'])]);
+
+        self::assertSame('openai', $this->fetchAllRows()[0]['service_code']);
     }
 
     public function test_it_rolls_up_cache_split_and_failed_calls_into_the_daily_table(): void
@@ -78,43 +109,77 @@ final class UsageDailyTest extends TestCase
         self::assertSame(3, (int) $stored['cache_write_tokens']);
     }
 
-    public function test_it_overwrites_failed_calls_and_cache_split_when_a_day_is_rolled_up_again(): void
+    public function test_it_adds_the_cache_split_and_reasoning_tokens_when_both_sides_reported_them(): void
     {
         $this->resource->upsertAggregates([$this->row([
-            'failed_calls' => 2,
             'cache_read_tokens' => 5,
             'cache_write_tokens' => 3,
+            'reasoning_tokens' => 7,
         ])]);
         $this->resource->upsertAggregates([$this->row([
-            'failed_calls' => 1,
             'cache_read_tokens' => 9,
             'cache_write_tokens' => 4,
+            'reasoning_tokens' => 1,
         ])]);
 
         $stored = $this->fetchAllRows();
         self::assertCount(1, $stored);
-        self::assertSame(1, (int) $stored[0]['failed_calls']);
-        self::assertSame(9, (int) $stored[0]['cache_read_tokens']);
-        self::assertSame(4, (int) $stored[0]['cache_write_tokens']);
+        self::assertSame(14, (int) $stored[0]['cache_read_tokens']);
+        self::assertSame(7, (int) $stored[0]['cache_write_tokens']);
+        self::assertSame(8, (int) $stored[0]['reasoning_tokens']);
     }
 
     /**
-     * The requirement this whole task exists for: MySQL's unique key on
-     * (`usage_date`, `service_id`, `model`, `consumer`, `store_id`) is what lets an identical
-     * second write match and replace instead of insert, so a cron re-running after a partial
-     * failure never doubles a day's totals. No fake can prove this; it is MySQL's behaviour.
+     * Plain `col + VALUES(col)` is null as soon as either side is, which would wipe a known stored
+     * total the moment a batch arrived from calls that did not report the figure.
      */
-    public function test_it_does_not_double_the_totals_when_the_same_aggregates_are_saved_twice(): void
+    public function test_it_keeps_the_stored_nullable_count_when_the_new_rows_did_not_report_it(): void
     {
-        $row = $this->row(['calls' => 5, 'input_tokens' => 40, 'output_tokens' => 10, 'total_tokens' => 50]);
+        $this->resource->upsertAggregates([$this->row([
+            'cache_read_tokens' => 5,
+            'cache_write_tokens' => 3,
+            'reasoning_tokens' => 7,
+        ])]);
+        $this->resource->upsertAggregates([$this->row([
+            'cache_read_tokens' => null,
+            'cache_write_tokens' => null,
+            'reasoning_tokens' => null,
+        ])]);
 
-        $this->resource->upsertAggregates([$row]);
-        $this->resource->upsertAggregates([$row]);
+        $stored = $this->fetchAllRows()[0];
+        self::assertSame(5, (int) $stored['cache_read_tokens']);
+        self::assertSame(3, (int) $stored['cache_write_tokens']);
+        self::assertSame(7, (int) $stored['reasoning_tokens']);
+    }
+
+    public function test_it_takes_the_new_nullable_count_when_the_stored_row_had_none(): void
+    {
+        $this->resource->upsertAggregates([$this->row([
+            'cache_read_tokens' => null,
+            'cache_write_tokens' => null,
+            'reasoning_tokens' => null,
+        ])]);
+        $this->resource->upsertAggregates([$this->row([
+            'cache_read_tokens' => 9,
+            'cache_write_tokens' => 4,
+            'reasoning_tokens' => 2,
+        ])]);
+
+        $stored = $this->fetchAllRows()[0];
+        self::assertSame(9, (int) $stored['cache_read_tokens']);
+        self::assertSame(4, (int) $stored['cache_write_tokens']);
+        self::assertSame(2, (int) $stored['reasoning_tokens']);
+    }
+
+    public function test_it_keeps_a_nullable_count_null_when_neither_side_reported_it(): void
+    {
+        $this->resource->upsertAggregates([$this->row(['reasoning_tokens' => null])]);
+        $this->resource->upsertAggregates([$this->row(['reasoning_tokens' => null])]);
 
         $stored = $this->fetchAllRows();
         self::assertCount(1, $stored);
-        self::assertSame(5, (int) $stored[0]['calls']);
-        self::assertSame(50, (int) $stored[0]['total_tokens']);
+        self::assertSame(2, (int) $stored[0]['calls']);
+        self::assertNull($stored[0]['reasoning_tokens']);
     }
 
     public function test_it_stores_rows_for_different_consumers_on_the_same_day_separately(): void
@@ -212,12 +277,12 @@ final class UsageDailyTest extends TestCase
         $byConsumer = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_SERVICE
+            UsageDailyReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));
@@ -235,12 +300,12 @@ final class UsageDailyTest extends TestCase
         $daily = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
         $monthly = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            UsageDailyReportInterface::GRANULARITY_MONTH
         );
 
         self::assertSame(['2026-01-05', '2026-01-06', '2026-02-01'], array_column($daily, 'period'));
@@ -271,7 +336,7 @@ final class UsageDailyTest extends TestCase
         $storeOne = $this->resource->groupRange(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-02-01 00:00:00'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -286,7 +351,7 @@ final class UsageDailyTest extends TestCase
         $storeOne = $this->resource->seriesRange(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             1
         );
 
@@ -304,8 +369,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-17 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
 
         $byBucketAndGroup = [];
@@ -329,8 +394,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-01 00:00:00'),
             new \DateTimeImmutable('2026-03-01 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GRANULARITY_MONTH,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
 
         self::assertSame(['2026-01', '2026-02'], array_column($series, 'period'));
@@ -347,8 +412,8 @@ final class UsageDailyTest extends TestCase
         $series = $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageDailyReportInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GROUP_BY_CONSUMER,
             1
         );
 
@@ -364,7 +429,7 @@ final class UsageDailyTest extends TestCase
         $this->resource->seriesRangeGrouped(
             new \DateTimeImmutable('2026-01-15 00:00:00'),
             new \DateTimeImmutable('2026-01-16 00:00:00'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY,
+            UsageDailyReportInterface::GRANULARITY_DAY,
             'model'
         );
     }

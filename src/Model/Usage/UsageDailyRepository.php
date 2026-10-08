@@ -15,7 +15,9 @@ use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\Api\SearchResultsInterfaceFactory;
 
 /**
- * Implementation of {@see UsageDailyRepositoryInterface}.
+ * Implementation of {@see UsageDailyRepositoryInterface} and of the internal
+ * {@see UsageDailyReportInterface}: one class over one table, split into two contracts only so
+ * the range aggregation stays out of the public API.
  *
  * Every method here does one of two things: assemble a {@see Collection} for {@see getList()} the
  * way any Magento repository does, or delegate straight to
@@ -23,7 +25,7 @@ use Magento\Framework\Api\SearchResultsInterfaceFactory;
  * defines. Nothing here writes SQL of its own, which is what keeps this class testable against a
  * small fake of {@see UsageDailyResourceInterface} instead of against a real database connection.
  */
-class UsageDailyRepository implements UsageDailyRepositoryInterface
+class UsageDailyRepository implements UsageDailyRepositoryInterface, UsageDailyReportInterface
 {
     /**
      * @param UsageDailyResourceInterface $resource The five hand-written statements this

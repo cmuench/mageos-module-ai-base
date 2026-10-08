@@ -4,12 +4,24 @@
     <acl>
         <resources>
             <resource id="Magento_Backend::admin">
+                <!--
+                    Where every configuration section's resource lives, Magento_Config::config
+                    ("Stores > Settings > Configuration" in the role tree). This resource guards
+                    provider credentials and the outbound Test Connection and Refresh Models
+                    requests, so it must only come with the permission to edit configuration, not
+                    with anything a merchandiser role is routinely given, such as Attributes.
+
+                    Only the position changed, never the id: a role's grant is stored against the
+                    id, so roles that already had it keep it.
+                -->
                 <resource id="Magento_Backend::stores">
-                    <resource id="Magento_Backend::stores_attributes">
-                        <resource id="MageOS_AiBase::configuration"
-                                  title="Mage-OS AI Configuration"
-                                  translate="title"
-                                  sortOrder="30"/>
+                    <resource id="Magento_Backend::stores_settings">
+                        <resource id="Magento_Config::config">
+                            <resource id="MageOS_AiBase::configuration"
+                                      title="Mage-OS AI Configuration"
+                                      translate="title"
+                                      sortOrder="30"/>
+                        </resource>
                     </resource>
                 </resource>
                 <!--

@@ -8,8 +8,7 @@ use PHPUnit\Framework\TestCase;
 use SimpleXMLElement;
 
 /**
- * Guards the `BridgeRegistry` `bridges` argument in di.xml, the one place that decides which
- * provider's cache tokens the client normalizes as living outside the reported prompt count.
+ * Guards the parts of di.xml whose mistakes only show up as a provider rejecting the request.
  */
 final class DiXmlTest extends TestCase
 {
@@ -43,6 +42,29 @@ final class DiXmlTest extends TestCase
             }
 
             self::assertNull($flag, $serviceCode);
+        }
+    }
+
+    /**
+     * symfony/ai's Gemini bridge nests every option under generationConfig except `tool_config`,
+     * which it lifts to the top of the request. Spelled `toolConfig`, a tool choice stays nested
+     * and Gemini answers every call that sets one with a 400.
+     */
+    public function test_every_gemini_tool_choice_lands_under_the_key_the_bridge_lifts_out(): void
+    {
+        $fragments = $this->config->xpath(
+            '//type[@name="MageOS\AiBase\Model\Client\OptionNormalizer"]/arguments/argument[@name="dialects"]'
+            . '/item[@name="gemini"]/item[@name="values"]/item[@name="tool_choice"]/item',
+        );
+        self::assertNotEmpty($fragments);
+
+        foreach ($fragments as $fragment) {
+            $keys = array_map(
+                static fn (SimpleXMLElement $item): string => (string) $item['name'],
+                $fragment->xpath('item'),
+            );
+
+            self::assertSame(['tool_config'], $keys, (string) $fragment['name']);
         }
     }
 }

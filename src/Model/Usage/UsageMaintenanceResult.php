@@ -20,12 +20,26 @@ class UsageMaintenanceResult
      *        $aggregatedRows: nothing is ever deleted that was not first rolled up.
      * @param int $prunedDailyRows `mageos_ai_usage_daily` rows deleted this run for being past
      *        the daily retention window.
+     * @param bool $isSkipped True when the run did nothing because another run held the roll-up
+     *        lock. Carried separately from the counts because "skipped" and "ran, found nothing to
+     *        do" are both all zeros, and a caller logging a summary has to tell them apart.
      */
     public function __construct(
         private readonly int $aggregatedRows,
         private readonly int $deletedRows,
         private readonly int $prunedDailyRows,
+        private readonly bool $isSkipped = false,
     ) {
+    }
+
+    /**
+     * Whether this run was skipped because another run held the roll-up lock.
+     *
+     * @return bool
+     */
+    public function isSkipped(): bool
+    {
+        return $this->isSkipped;
     }
 
     /**

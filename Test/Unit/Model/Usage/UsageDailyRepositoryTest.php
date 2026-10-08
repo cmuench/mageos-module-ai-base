@@ -6,11 +6,13 @@ namespace MageOS\AiBase\Test\Unit\Model\Usage;
 
 require_once __DIR__ . '/../../Stubs/UsageDailyCollectionFactoryStub.php';
 require_once __DIR__ . '/../../Stubs/SearchResultsInterfaceFactoryStub.php';
+require_once __DIR__ . '/../../Stubs/DailyRowAddition.php';
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageDailyReportInterface;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily\CollectionFactory;
 use MageOS\AiBase\Model\ResourceModel\Usage\UsageDailyResourceInterface;
 use MageOS\AiBase\Model\Usage\UsageDailyRepository;
+use MageOS\AiBase\Test\Unit\Stubs\DailyRowAddition;
 use Magento\Framework\Api\SearchCriteria\CollectionProcessorInterface;
 use Magento\Framework\Api\SearchResultsInterfaceFactory;
 use PHPUnit\Framework\TestCase;
@@ -21,7 +23,7 @@ use PHPUnit\Framework\TestCase;
  * Exercises the repository against {@see FakeUsageDailyResource}, an in-memory stand-in for
  * {@see \MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily}. `Magento\Framework\DB\Adapter\
  * AdapterInterface` has over a hundred methods and is not realistically fakeable, which is why the
- * upsert/replace/idempotency behaviour under test here is proven twice: the fake mirrors MySQL's
+ * additive upsert behaviour under test here is proven twice: the fake mirrors MySQL's
  * insert-on-duplicate semantics closely enough to drive these tests honestly, and
  * `Test/Integration/Model/Usage/UsageDailyTest.php` proves the same behaviour against a real
  * database, which is the only thing that can actually prove it.
@@ -49,28 +51,15 @@ final class UsageDailyRepositoryTest extends TestCase
         self::assertSame([$this->aggregateRow()], $this->resource->getStoredRows());
     }
 
-    public function test_it_replaces_the_counts_of_an_existing_row_for_the_same_day_and_grouping_key(): void
+    public function test_it_adds_the_counts_to_an_existing_row_for_the_same_day_and_grouping_key(): void
     {
         $this->subject->saveAggregates([$this->aggregateRow(['calls' => 3, 'total_tokens' => 300])]);
         $this->subject->saveAggregates([$this->aggregateRow(['calls' => 7, 'total_tokens' => 700])]);
 
         $stored = $this->resource->getStoredRows();
         self::assertCount(1, $stored);
-        self::assertSame(7, $stored[0]['calls']);
-        self::assertSame(700, $stored[0]['total_tokens']);
-    }
-
-    public function test_it_does_not_double_the_totals_when_the_same_aggregates_are_saved_twice(): void
-    {
-        $row = $this->aggregateRow(['calls' => 5, 'total_tokens' => 500]);
-
-        $this->subject->saveAggregates([$row]);
-        $this->subject->saveAggregates([$row]);
-
-        $stored = $this->resource->getStoredRows();
-        self::assertCount(1, $stored);
-        self::assertSame(5, $stored[0]['calls']);
-        self::assertSame(500, $stored[0]['total_tokens']);
+        self::assertSame(10, $stored[0]['calls']);
+        self::assertSame(1000, $stored[0]['total_tokens']);
     }
 
     public function test_it_stores_rows_for_different_consumers_on_the_same_day_separately(): void
@@ -146,12 +135,12 @@ final class UsageDailyRepositoryTest extends TestCase
         $byConsumer = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_CONSUMER
+            UsageDailyReportInterface::GROUP_BY_CONSUMER
         );
         $byService = $this->subject->groupRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-01-31'),
-            UsageDailyRepositoryInterface::GROUP_BY_SERVICE
+            UsageDailyReportInterface::GROUP_BY_SERVICE
         );
 
         self::assertSame(['docs_search', 'chat'], array_column($byConsumer, 'consumer'));
@@ -169,12 +158,12 @@ final class UsageDailyRepositoryTest extends TestCase
         $daily = $this->subject->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_DAY
+            UsageDailyReportInterface::GRANULARITY_DAY
         );
         $monthly = $this->subject->seriesRange(
             new \DateTimeImmutable('2026-01-01'),
             new \DateTimeImmutable('2026-03-01'),
-            UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            UsageDailyReportInterface::GRANULARITY_MONTH
         );
 
         self::assertSame(['2026-01-05', '2026-01-06', '2026-02-01'], array_column($daily, 'period'));
@@ -215,7 +204,8 @@ final class UsageDailyRepositoryTest extends TestCase
  * Mirrors MySQL's insert-on-duplicate-key semantics closely enough to drive
  * {@see UsageDailyRepositoryTest} honestly: a row is keyed by the same
  * (`usage_date`, `service_id`, `model`, `consumer`, `store_id`) tuple the real unique constraint
- * covers, and a second write to the same key replaces rather than sums the stored counts.
+ * covers, and a second write to the same key adds to the stored counts through
+ * {@see DailyRowAddition}, keeping a nullable count null only when neither side reported it.
  */
 final class FakeUsageDailyResource implements UsageDailyResourceInterface
 {
@@ -237,7 +227,10 @@ final class FakeUsageDailyResource implements UsageDailyResourceInterface
     {
         $this->upsertCallCount++;
         foreach ($rows as $row) {
-            $this->rowsByKey[$this->groupingKey($row)] = $row;
+            $key = $this->groupingKey($row);
+            $this->rowsByKey[$key] = isset($this->rowsByKey[$key])
+                ? DailyRowAddition::add($this->rowsByKey[$key], $row)
+                : $row;
         }
     }
 
@@ -316,7 +309,7 @@ final class FakeUsageDailyResource implements UsageDailyResourceInterface
     {
         $buckets = [];
         foreach ($this->rowsInWindow($from, $to) as $row) {
-            $period = $granularity === UsageDailyRepositoryInterface::GRANULARITY_MONTH
+            $period = $granularity === UsageDailyReportInterface::GRANULARITY_MONTH
                 ? substr((string) $row['usage_date'], 0, 7)
                 : (string) $row['usage_date'];
             $buckets[$period][] = $row;

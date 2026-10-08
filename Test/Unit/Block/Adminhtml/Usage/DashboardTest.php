@@ -23,6 +23,7 @@ use MageOS\AiBase\Model\Usage\Graph\SeriesPalette;
 use MageOS\AiBase\Model\Usage\Graph\SvgDocument;
 use MageOS\AiBase\Model\Usage\Graph\SvgRenderer;
 use MageOS\AiBase\Model\Usage\Graph\TrendRenderer;
+use MageOS\AiBase\Model\Usage\ServiceRowLabels;
 use MageOS\AiBase\Model\Usage\UsageBreakdown;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use MageOS\AiBase\Model\Usage\UsageTotals;
@@ -142,6 +143,18 @@ final class DashboardTest extends TestCase
 
         self::assertStringContainsString('Anthropic', $graph);
         self::assertStringNotContainsString('>_row_1<', $graph);
+    }
+
+    public function test_it_labels_a_service_row_with_the_name_it_was_given_in_the_graph(): void
+    {
+        $this->serviceSelector->withService(new AiService('_row_1', 'anthropic', [
+            AiServiceInterface::CONFIGURATION_LABEL => 'Chat AI',
+        ]));
+        $this->serviceRegistry = new ServiceRegistry([new FakeServiceConfiguration('anthropic', 'Anthropic')]);
+        $this->usageStats->withServiceBreakdown([new UsageBreakdown('_row_1', $this->totals(200, 6))]);
+        $block = $this->blockRequesting(Dashboard::PERIOD_THIS_MONTH, null);
+
+        self::assertStringContainsString('Chat AI', $block->getServiceGraph());
     }
 
     public function test_it_falls_back_to_the_raw_service_id_when_no_row_carries_it(): void
@@ -326,6 +339,50 @@ final class DashboardTest extends TestCase
 
         self::assertStringContainsString('Anthropic', $graph);
         self::assertStringNotContainsString('>_row_1<', $graph);
+    }
+
+    /**
+     * The chart keys its lines by label, so two rows of the same provider labelled by provider
+     * name alone used to collapse into one line and drop the other row's usage from the chart.
+     */
+    public function test_it_draws_one_trend_line_per_service_row_when_two_rows_share_a_provider(): void
+    {
+        $this->serviceSelector->withService(new AiService('_row_1', 'anthropic', [
+            AiServiceInterface::CONFIGURATION_LABEL => 'Chat AI',
+        ]));
+        $this->serviceSelector->withService(new AiService('_row_2', 'anthropic', [
+            AiServiceInterface::CONFIGURATION_LABEL => 'Summaries',
+        ]));
+        $this->serviceRegistry = new ServiceRegistry([new FakeServiceConfiguration('anthropic', 'Anthropic')]);
+        $this->usageStats->withServiceSeries([
+            '_row_1' => [new UsageBreakdown('2026-09-01', $this->totals(100, 2))],
+            '_row_2' => [new UsageBreakdown('2026-09-01', $this->totals(40, 1))],
+        ]);
+        $block = $this->blockRequesting(Dashboard::PERIOD_THIS_MONTH, null, Dashboard::TREND_BY_SERVICE);
+
+        $graph = $block->getTrendGraph();
+
+        self::assertSame(2, substr_count($graph, 'class="mageos-ai-usage-graph-trend"'));
+        self::assertStringContainsString('Chat AI', $graph);
+        self::assertStringContainsString('Summaries', $graph);
+    }
+
+    public function test_it_tells_apart_two_unnamed_rows_of_the_same_provider_by_their_id(): void
+    {
+        $this->serviceSelector->withService(new AiService('_row_1', 'anthropic', []));
+        $this->serviceSelector->withService(new AiService('_row_2', 'anthropic', []));
+        $this->serviceRegistry = new ServiceRegistry([new FakeServiceConfiguration('anthropic', 'Anthropic')]);
+        $this->usageStats->withServiceSeries([
+            '_row_1' => [new UsageBreakdown('2026-09-01', $this->totals(100, 2))],
+            '_row_2' => [new UsageBreakdown('2026-09-01', $this->totals(40, 1))],
+        ]);
+        $block = $this->blockRequesting(Dashboard::PERIOD_THIS_MONTH, null, Dashboard::TREND_BY_SERVICE);
+
+        $graph = $block->getTrendGraph();
+
+        self::assertSame(2, substr_count($graph, 'class="mageos-ai-usage-graph-trend"'));
+        self::assertStringContainsString('Anthropic (_row_1)', $graph);
+        self::assertStringContainsString('Anthropic (_row_2)', $graph);
     }
 
     public function test_it_keeps_the_trend_when_linking_to_another_period(): void
@@ -605,8 +662,10 @@ final class DashboardTest extends TestCase
         $reflection->getProperty('usageConfig')->setValue($block, $this->usageConfig);
         $reflection->getProperty('svgRenderer')->setValue($block, $this->svgRenderer);
         $reflection->getProperty('timezone')->setValue($block, new FakeTimezone('UTC'));
-        $reflection->getProperty('serviceSelector')->setValue($block, $this->serviceSelector);
-        $reflection->getProperty('serviceRegistry')->setValue($block, $this->serviceRegistry);
+        $reflection->getProperty('serviceRowLabels')->setValue(
+            $block,
+            new ServiceRowLabels($this->serviceSelector, $this->serviceRegistry)
+        );
         $reflection->getProperty('storeManager')->setValue($block, $this->storeManager);
         $reflection->getProperty('now')->setValue($block, $now);
         $reflection->getProperty('_request')->setValue($block, $request);

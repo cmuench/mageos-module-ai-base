@@ -17,14 +17,31 @@ description generation, translations, chat, ...). To *add* a provider, see
 <sequence><module name="MageOS_AiBase"/></sequence>
 ```
 
-Type-hint only against `MageOS\AiBase\Api\*` interfaces. Never depend on `Model\*` classes
-or on symfony/ai types, with one exception: the exception classes in `Model\Client\*` that
-`chat()`, `complete()` and `streamChat()` throw (listed under
-[Failure modes to handle](#failure-modes-to-handle)) are public API, since catching one means
-naming it — implementations can be swapped by the host store via `<preference>`.
+Type-hint only against `MageOS\AiBase\Api\*` interfaces and the `MageOS\AiBase\Exceptions\*`
+classes that `chat()`, `complete()` and `streamChat()` throw (listed under
+[Failure modes to handle](#failure-modes-to-handle)). Never depend on `Model\*` classes or on
+symfony/ai types; implementations can be swapped by the host store via `<preference>`.
 Everything below follows that rule: requests are assembled through
 `Api\ChatRequestBuilderInterface`, and every `Api\Data` interface has a `<preference>`, so the
 Magento-generated `*InterfaceFactory` for it resolves if you'd rather build one directly.
+
+## What's stable
+
+This module follows semantic versioning, and only types marked `@api`, plus
+`AiServices\AbstractAiService`, are covered by it (Magento's coding standard keeps `@api` off
+abstract classes). Anything
+without `@api` (every `Model\*` class, `AiServices\*` traits, `ResourceModel\*`) can change in any
+release.
+
+| Type | Promise within a major version |
+|---|---|
+| `Api\*` and `Api\Data\*` interfaces | Safe to call and to type-hint against. Methods may be added in a minor release, so don't implement them yourself; write a plugin to change behavior. A store that replaces the whole client stack with a `<preference>` on `AiClientFactoryInterface` takes on adding those methods. |
+| `Api\Data\AiServiceConfigurationInterface` | Safe to implement, by extending `AiServices\AbstractAiService`, which gets a default for every method added in a minor release. |
+| Capability interfaces (`Api\ModelListProviderInterface`, `Api\PlatformArgumentsProviderInterface`) | Safe to implement. They don't change; a new capability gets a new interface. |
+| The `bridges` argument of `Model\Client\BridgeRegistry` and the `dialects` argument of `Model\Client\OptionNormalizer` in di.xml | The keys documented in [PROVIDERS.md](PROVIDERS.md) don't change; new optional keys may be added. |
+| `Exceptions\*` | Safe to catch. New subclasses may be added in a minor release, always below an existing one, so an existing `catch` keeps catching them. |
+| Enums in `Api\Data` | Cases may be added in a minor release. Give a `match` over one a `default` arm. |
+| JSON of `StreamChunkInterface`, `ToolCallInterface`, `TokenUsageInterface` | Keys don't change or disappear. New keys may be added. |
 
 ## Making AI calls (recommended)
 
@@ -254,13 +271,28 @@ A `match` with no default arm throws `UnhandledMatchError` the moment a new
 `ToolCallStart` were added; add a default arm (`default => null`) if you would rather ignore
 chunk kinds you do not yet handle than update this `match` on every release.
 
-Bridging to a callback-style stream is three lines, since `getData()` is a flat payload:
+Every chunk is `JsonSerializable`, so sending the stream to a browser as server-sent events is
+one line per chunk:
 
 ```php
 foreach ($client->streamChat($request) as $chunk) {
-    $onChunk($chunk->getType()->value, $chunk->getData());
+    echo 'data: ' . json_encode($chunk) . "\n\n";
+    flush();
 }
 ```
+
+The JSON shape is stable across 1.x:
+
+| Chunk type | JSON |
+|---|---|
+| `text`, `thinking` | `{"type": "text", "text": "Hel"}` |
+| `thinking_start` | `{"type": "thinking_start"}` |
+| `tool_call`, `tool_call_start` | `{"type": "tool_call", "tool_call": {"id": "toolu_01", "name": "get_orders", "arguments": {"status": "pending"}}}` |
+| `usage` | `{"type": "usage", "usage": {"prompt_tokens": 120, "completion_tokens": 45, "total_tokens": 165, "cache_read_tokens": null, "cache_write_tokens": null, "reasoning_tokens": null}}` |
+
+`arguments` is always an object, `{}` on a `tool_call_start` chunk. A tool call and a usage
+object encode the same way on their own, so `json_encode($response->getToolCalls())` gives the
+same shape for a buffered response.
 
 Tool calls arrive **complete**, with arguments already accumulated and JSON-decoded by the
 provider bridge, on a `StreamChunkType::ToolCall` chunk. There are no SSE frames to parse and
@@ -353,7 +385,7 @@ On Anthropic, `getRawFinishReason()` is `null` on a truncated stream: the bridge
 ### Failure modes to handle
 
 `create()` throws `LocalizedException` for setup problems (no service configured, no bridge
-registered, symfony/ai-platform not installed) with admin-readable messages. `chat()`,
+registered, the provider's Symfony AI bridge not installed) with admin-readable messages. `chat()`,
 `complete()` and `streamChat()` throw one of this module's own typed exceptions, every one of
 which extends `LocalizedException`, so an existing `catch (LocalizedException)` still catches
 everything without any change:
@@ -362,8 +394,8 @@ everything without any change:
 |---|---|---|
 | No service configured (at all, or for the requested code) | `create()` | `LocalizedException` |
 | No client bridge registered for the service code | `create()` | `LocalizedException` |
-| symfony/ai-platform not installed | `create()` | `LocalizedException` |
-| A call rejected before it ever reached the provider: an unsupported option, an invalid model override, a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
+| The provider's Symfony AI bridge package not installed | `create()` | `LocalizedException` |
+| A call rejected before it ever reached the provider: an unsupported option, an invalid model override, one the service's bridge has no route to, or any override on Azure (which always runs its configured deployment), a tool result message missing its call id | `chat()` / `complete()` / `streamChat()` | `AiRequestNotSentException` |
 | The provider rejected the configured credentials | `chat()` / `complete()` / `streamChat()` | `AiAuthenticationException` |
 | The provider throttled the call | `chat()` / `complete()` / `streamChat()` | `AiRateLimitedException` (`getRetryAfter(): ?int`) |
 | A server error, an overloaded model, a network failure (connection refused, DNS failure, connection reset, timeout), or a stream that ended before reporting completion | `chat()` / `complete()` / `streamChat()` | `AiTransientException` |
@@ -390,11 +422,11 @@ it (or `LocalizedException`) catches all of them, the same way it always has. Ca
 react differently per failure:
 
 ```php
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
-use MageOS\AiBase\Model\Client\AiInvalidRequestException;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiServiceException;
-use MageOS\AiBase\Model\Client\AiTransientException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 
 try {
     $response = $client->complete($prompt);
@@ -486,6 +518,101 @@ if ($service === null) {
 `createById()` throws `LocalizedException` in that same situation rather than silently falling
 back to another row: another row means another account and another bill, which is not a
 substitution to make on the admin's behalf.
+
+## Moving your module's own credentials into AI Base
+
+A module that kept its own API key fields before it used this one can move the saved key over
+in a data patch, so the merchant doesn't have to find it and type it in again (an `obscure`
+field can't be read back to copy it anyway). `Api\ServiceImporterInterface` adds an ordinary
+row to the AI Configuration form and returns its id:
+
+```php
+ServiceImporterInterface::import(string $serviceCode, array $configuration, ?string $label = null): string
+ServiceImporterInterface::importFromConfig(string $serviceCode, array $fieldPaths, ?string $label = null): ?string
+```
+
+- `import()` takes plain values (`['api_key' => 'sk-...', 'model' => 'gpt-4o']`).
+  `importFromConfig()` takes a map of this module's field name to **your** config path, reads
+  each one at default scope, and decrypts the ones this module stores encrypted when they hold
+  a Magento ciphertext (what an `obscure` field with the `Encrypted` backend model stores). A
+  plaintext value, such as a key saved before your field was encrypted, is used as it is.
+- `importFromConfig()` returns `null` and adds nothing when the credential is empty, so the
+  patch doesn't need its own check.
+- The row is added at default scope, enabled, with its credentials encrypted the same way the
+  form encrypts them. The administrator sees and edits it like any other row.
+- Only fields the provider declares are accepted (`api_key`, `model`, `base_url`, ...; see
+  [PROVIDERS.md](PROVIDERS.md)). An unknown field name throws instead of being dropped, so a
+  typo can't quietly import a row without its key. Leaving `model` out is fine.
+- Importing the same values again returns the id of the row that already holds them, so a
+  patch that runs twice, or two modules moving the same key, end up with one row.
+- It throws a `LocalizedException` when the service code isn't registered, when the AI services
+  are pinned in `app/etc/env.php` / `config.php`, or when an administrator saved the AI
+  Configuration form at the same moment. In a data patch that fails `setup:upgrade`, which is
+  usually what you want; catch it if your module can keep running on its old fields.
+
+A complete patch, storing the row id in the module's own `ConfiguredService` select (see
+[Letting the admin pick a service](#letting-the-admin-pick-a-service)) and removing the old key
+afterwards:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Vendor\Translations\Setup\Patch\Data;
+
+use Magento\Framework\App\Config\Storage\WriterInterface;
+use Magento\Framework\Setup\Patch\DataPatchInterface;
+use MageOS\AiBase\Api\ServiceImporterInterface;
+
+class MoveOpenAiKeyToAiBase implements DataPatchInterface
+{
+    private const OLD_API_KEY_PATH = 'vendor_translations/engine/openai_api_key';
+    private const OLD_MODEL_PATH = 'vendor_translations/engine/openai_model';
+    private const AI_SERVICE_PATH = 'vendor_translations/engine/ai_service';
+
+    public function __construct(
+        private readonly ServiceImporterInterface $serviceImporter,
+        private readonly WriterInterface $configWriter,
+    ) {
+    }
+
+    public function apply(): self
+    {
+        $rowId = $this->serviceImporter->importFromConfig(
+            'openai',
+            ['api_key' => self::OLD_API_KEY_PATH, 'model' => self::OLD_MODEL_PATH],
+            'Translations',
+        );
+        if ($rowId === null) {
+            return $this;
+        }
+
+        $this->configWriter->save(self::AI_SERVICE_PATH, $rowId);
+        $this->configWriter->delete(self::OLD_API_KEY_PATH);
+        $this->configWriter->delete(self::OLD_MODEL_PATH);
+
+        return $this;
+    }
+
+    public static function getDependencies(): array
+    {
+        return [];
+    }
+
+    public function getAliases(): array
+    {
+        return [];
+    }
+}
+```
+
+Then remove the old fields from your `system.xml` and stop reading them; from here on the key
+lives only in AI Base, and your code resolves `AI_SERVICE_PATH` through `createById()`. Only
+the default-scope value is moved: if your old field was editable per website or store, those
+values stay where they are and are yours to handle. Keep `MageOS_AiBase` in your
+`module.xml` `<sequence>` (see [Declare the dependency](#declare-the-dependency)) so its
+configuration is in place when your patch runs.
 
 ## Reaching the platform directly (escape hatch)
 
@@ -587,6 +714,10 @@ Notes:
 - `getId()` is the row's stable identity, and the only thing that separates two rows of the
   same provider. It is what the option source stores and what `getById()` resolves.
 - An empty array means nothing is configured — expected state on fresh installs; handle it.
+- A row an administrator **disabled** is never returned, by any lookup. It keeps its id and
+  credentials and stays in the admin form, but nothing may call it, so callers don't have to
+  check. `getLabel()` returns the name the administrator gave the row (`'Chat AI'`), or null;
+  `isEnabled()` is always true for anything the selector hands you.
 - Configuration is read at store scope, in whatever scope is ambient at the moment you call.
   In a storefront request that is the current store, so a per-store setup resolves on its own.
   **In adminhtml, in cron and on the CLI there is no current store**, so the default scope

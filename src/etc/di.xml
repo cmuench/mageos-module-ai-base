@@ -5,6 +5,9 @@
     <preference for="MageOS\AiBase\Api\Data\AiServiceInterface" type="MageOS\AiBase\Model\AiService"/>
     <preference for="MageOS\AiBase\Api\Data\FieldDescriptorInterface" type="MageOS\AiBase\Model\FieldDescriptor"/>
     <preference for="MageOS\AiBase\Api\AiClientFactoryInterface" type="MageOS\AiBase\Model\Client\ClientFactory"/>
+    <preference for="MageOS\AiBase\Api\JsonFetcherInterface" type="MageOS\AiBase\Model\ModelList\HttpFetcher"/>
+    <!-- For other modules' data patches moving their own saved credentials into this module. -->
+    <preference for="MageOS\AiBase\Api\ServiceImporterInterface" type="MageOS\AiBase\Model\Config\ServiceImporter"/>
 
     <!-- Chat value objects. Consumer modules are told to type-hint against Api only, which is only
          honest if there is a way to obtain one without naming a Model class: these preferences are
@@ -32,6 +35,7 @@
     <preference for="MageOS\AiBase\Model\ResourceModel\Usage\UsageDailyResourceInterface"
                 type="MageOS\AiBase\Model\ResourceModel\Usage\UsageDaily"/>
     <preference for="MageOS\AiBase\Api\UsageDailyRepositoryInterface" type="MageOS\AiBase\Model\Usage\UsageDailyRepository"/>
+    <preference for="MageOS\AiBase\Model\Usage\UsageDailyReportInterface" type="MageOS\AiBase\Model\Usage\UsageDailyRepository"/>
 
     <!-- The raw usage log's repository (task 005) depends on the narrow
          UsageLogResourceInterface rather than the concrete resource model, so its unit tests can
@@ -40,6 +44,7 @@
     <preference for="MageOS\AiBase\Model\ResourceModel\Usage\UsageLogResourceInterface"
                 type="MageOS\AiBase\Model\ResourceModel\Usage\UsageLog"/>
     <preference for="MageOS\AiBase\Api\UsageRecordRepositoryInterface" type="MageOS\AiBase\Model\Usage\UsageRecordRepository"/>
+    <preference for="MageOS\AiBase\Model\Usage\UsageRecordReportInterface" type="MageOS\AiBase\Model\Usage\UsageRecordRepository"/>
 
     <!-- Same reasoning one level up: UsageMaintenance commits each day's aggregate and the delete
          behind it together, and depends on the narrow UsageTransactionInterface so its unit tests
@@ -96,11 +101,12 @@
         </arguments>
     </type>
 
-    <!-- Symfony AI provider bridges. Soft dependency: FQCN strings, resolved only when a client
-         is created, and the package name so the admin form can say what to install. Since
-         symfony/ai-platform 0.12 each bridge ships as its own package. Every bundled provider has
-         one; a third party registering a provider without a bridge is marked unsupported in the
-         admin form, since there is nothing an administrator could install for it.
+    <!-- Symfony AI provider bridges. OpenAI and Anthropic are required, every other bridge is a
+         composer `suggest`: FQCN strings, resolved only when a client is created, and the package
+         name so the admin form can say what to install. Since symfony/ai-platform 0.12 each
+         bridge ships as its own package. Every bundled provider has one; a third party
+         registering a provider without a bridge is marked unsupported in the admin form, since
+         there is nothing an administrator could install for it.
 
          `dialect` names the request-option shape the bridge speaks, which decides how the universal
          options are spelled on the wire (see Model\Client\OptionNormalizer below). It belongs here
@@ -119,6 +125,8 @@
                     <item name="factory" xsi:type="string">Symfony\AI\Platform\Bridge\Azure\OpenAi\Factory</item>
                     <item name="package" xsi:type="string">symfony/ai-azure-platform</item>
                     <item name="dialect" xsi:type="string">openai_responses</item>
+                    <!-- The platform is built for one deployment and always sends it as the model. -->
+                    <item name="model_override" xsi:type="boolean">false</item>
                     <item name="catalog" xsi:type="string">Symfony\AI\Platform\Bridge\Azure\OpenAi\ModelCatalog</item>
                 </item>
                 <item name="deepseek" xsi:type="array">
@@ -385,39 +393,43 @@
                     <item name="lists" xsi:type="array">
                         <item name="stop" xsi:type="string">stop</item>
                     </item>
-                    <!-- Gemini's tool choice is `toolConfig.functionCallingConfig.mode`, with
+                    <!-- Gemini's tool choice is `tool_config.functionCallingConfig.mode`, with
                          `allowedFunctionNames` narrowing which tool "ANY" is allowed to be. Its
                          thinking control has no effort levels of its own, only a token budget
                          (`thinkingConfig.thinkingBudget`); the tiers below are this module's own
                          choice, not a value Google's API defines. The budget is per model: 2.5
                          Flash accepts 0 to switch thinking off, 2.5 Pro enforces a minimum and
                          rejects it, and newer models take a named thinking level rather than a
-                         budget (see docs/PROVIDERS.md, "Model-dependent values"). -->
+                         budget (see docs/PROVIDERS.md, "Model-dependent values").
+                         `tool_config` is snake_case on purpose: symfony/ai's Gemini bridge nests
+                         every option under generationConfig except `tool_config`, which it lifts
+                         to the top level of the request. Spelled `toolConfig` it stays nested,
+                         and Gemini rejects the request. -->
                     <item name="values" xsi:type="array">
                         <item name="tool_choice" xsi:type="array">
                             <item name="auto" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">AUTO</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="none" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">NONE</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="required" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">ANY</item>
                                     </item>
                                 </item>
                             </item>
                             <item name="tool" xsi:type="array">
-                                <item name="toolConfig" xsi:type="array">
+                                <item name="tool_config" xsi:type="array">
                                     <item name="functionCallingConfig" xsi:type="array">
                                         <item name="mode" xsi:type="string">ANY</item>
                                         <item name="allowedFunctionNames" xsi:type="array">
@@ -525,5 +537,24 @@
                 <item name="mageos_ai_usage_report" xsi:type="object">MageOS\AiBase\Console\Command\UsageReport</item>
             </argument>
         </arguments>
+    </type>
+    <type name="MageOS\AiBase\Model\Usage\Source\Store">
+        <arguments>
+            <argument name="storeViewOptions" xsi:type="object">Magento\Store\Ui\Component\Listing\Column\Store\Options</argument>
+        </arguments>
+    </type>
+
+    <!-- Encryption key rotation. Magento only re-encrypts config values that are a ciphertext as a
+         whole, so the AI credentials inside the services JSON would stay under the old key, and
+         decrypt to nothing once that key is removed from crypt/key. On every supported version a
+         key change re-encrypts data through `bin/magento encryption:data:re-encrypt`, so the
+         plugin sits on its core_config_data handler. Magento_EncryptionKey is deliberately not a
+         dependency: a plugin on a class that is absent or belongs to a disabled module is never
+         called. -->
+    <preference for="MageOS\AiBase\Model\Config\StoredServicesStorageInterface"
+                type="MageOS\AiBase\Model\Config\StoredServicesStorage"/>
+    <type name="Magento\Config\Model\Data\ReEncryptorList\CoreConfigDataReEncryptor\Handler">
+        <plugin name="mageos_ai_re_encrypt_credentials"
+                type="MageOS\AiBase\Plugin\EncryptionKey\ReEncryptWithCoreConfigData"/>
     </type>
 </config>

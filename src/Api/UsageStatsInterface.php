@@ -19,6 +19,11 @@ use MageOS\AiBase\Api\Data\UsageTotalsInterface;
  * querying whichever table or tables a given window touches and merging the result into one
  * answer, without ever double-counting a call that exists in both because the daily roll-up has
  * not pruned it yet. See {@see \MageOS\AiBase\Model\Usage\UsageStats} for exactly how.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface UsageStatsInterface
 {

@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\ModelList\HttpFetcher;
 
-class Anthropic implements AiServiceConfigurationInterface, ModelListProviderInterface
+class Anthropic extends AbstractAiService implements ModelListProviderInterface
 {
-    use FieldFactoryTrait;
     use ModelListTrait;
 
     /**
@@ -26,12 +24,13 @@ class Anthropic implements AiServiceConfigurationInterface, ModelListProviderInt
 
     /**
      * @param FieldDescriptorInterfaceFactory $fieldFactory
-     * @param HttpFetcher $modelListFetcher
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-        private readonly HttpFetcher $modelListFetcher,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
@@ -70,8 +69,8 @@ class Anthropic implements AiServiceConfigurationInterface, ModelListProviderInt
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
+            $this->apiKeyField(),
+            $this->modelField($this->getSupportedModels()),
         ];
     }
 

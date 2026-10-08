@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\Client;
 
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
+
 /**
  * Translates the handful of options every provider has into the name the target provider uses.
  *

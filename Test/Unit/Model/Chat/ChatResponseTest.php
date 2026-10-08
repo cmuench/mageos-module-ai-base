@@ -124,21 +124,17 @@ final class ChatResponseTest extends TestCase
     }
 
     /**
-     * The consumer bridging this to a callback-style stream sends the payload as an array, so the
-     * shape is part of the contract rather than a formatting detail.
+     * A tool call serializes the same way on a buffered response as inside a stream chunk, so a
+     * frontend handles both with one code path.
      */
-    public function test_chunk_data_is_a_flat_payload_for_callback_style_consumers(): void
+    public function test_a_tool_call_encodes_the_same_on_a_response_as_in_a_stream_chunk(): void
     {
         $toolCall = new ToolCall('toolu_01', 'get_orders', ['status' => 'pending']);
+        $chunk = new StreamChunk(StreamChunkType::ToolCall, '', $toolCall);
 
-        self::assertSame(['text' => 'Hel'], (new StreamChunk(StreamChunkType::Text, 'Hel'))->getData());
         self::assertSame(
-            ['id' => 'toolu_01', 'name' => 'get_orders', 'input' => ['status' => 'pending']],
-            (new StreamChunk(StreamChunkType::ToolCall, '', $toolCall))->getData(),
-        );
-        self::assertSame(
-            ['prompt_tokens' => 120, 'completion_tokens' => 45, 'total_tokens' => 165],
-            (new StreamChunk(StreamChunkType::Usage, '', null, new TokenUsage(120, 45)))->getData(),
+            json_encode($toolCall),
+            json_encode(json_decode((string) json_encode($chunk))->tool_call),
         );
     }
 
@@ -148,6 +144,5 @@ final class ChatResponseTest extends TestCase
 
         self::assertSame(StreamChunkType::Thinking, $chunk->getType());
         self::assertSame('weighing options', $chunk->getText());
-        self::assertSame(['text' => 'weighing options'], $chunk->getData());
     }
 }

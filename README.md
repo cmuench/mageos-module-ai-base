@@ -1,285 +1,79 @@
-# Mage-OS AI Base module
+# Mage-OS AI Base
 
-The goal of this module is to provide a way to allow to configure multiple AI backends.
+One place in Magento to configure your AI providers, one client every module can use to call them,
+and a dashboard that shows what each module spends.
 
-![The AI Configuration section: two configured services, one named Chat AI on Anthropic and enabled, one named Bulk summaries on OpenAI and switched off, each with its own Test Connection and model refresh, above the provider buttons and the install hint for providers whose bridge package is missing](docs/images/admin-configuration.png)
+<table>
+  <tr>
+    <td width="50%"><a href="docs/images/admin-configuration.png"><img src="docs/images/admin-configuration.png" alt="The AI Configuration section: configured services with their provider, model, Test Connection and Refresh Models buttons, above the buttons to add another provider"></a></td>
+    <td width="50%"><a href="docs/images/admin-usage-dashboard.png"><img src="docs/images/admin-usage-dashboard.png" alt="The AI Token Usage dashboard: total tokens for the period, a trend per consumer or per service, and breakdowns by consumer and by service"></a></td>
+  </tr>
+  <tr>
+    <td align="center">Stores &gt; Configuration &gt; Mage-OS &gt; AI Configuration</td>
+    <td align="center">Reports &gt; AI Token Usage</td>
+  </tr>
+</table>
 
-Every row names the provider it configures and the model it is set to, so the same backend can be
-added more than once (one row per account) and still be told apart; the pencil gives a row a name of
-its own, and the toggle takes it out of use without deleting its credentials. **Test Connection** and
-**Refresh Models** act on the row they sit in. In developer mode the form also offers providers whose
-Symfony AI bridge package is missing, and says what to install; in production those are left out.
+## What it provides
+
+- **Provider configuration.** OpenAI, Anthropic, Google Gemini, Azure OpenAI, DeepSeek, OpenRouter,
+  Hugging Face, Ollama, LM Studio and any OpenAI-compatible gateway. Add a provider more than once,
+  name each row, switch rows off, test the connection and refresh the model list from the form. API
+  keys are encrypted at rest and never shown again.
+- **One client for every provider.** Chat, streaming, tool calls and reasoning through a single
+  interface. Options like `max_tokens` and `tool_choice` are translated per provider, and failures
+  come back as typed exceptions you can retry or skip.
+- **Let the admin choose.** A ready-made source model for your own `system.xml`, so a store picks
+  which configured service your feature uses.
+- **Usage tracking.** Token counts per module, service and store, on a dashboard, a grid and a CLI
+  report. Prompts and responses are never stored.
+- **Extensible.** Add your own provider with one class and a few lines of `di.xml`.
 
 ## Installation
 
 ```bash
 composer require mage-os/module-ai-base
-php bin/magento module:enable MageOS_AiBase
+bin/magento module:enable MageOS_AiBase
+bin/magento setup:upgrade
 ```
 
-You can find the new configuration option in Stores > Configuration > Mage-OS > AI Configuration.
+Requires Magento 2.4.8+ or Mage-OS 1.1+, and PHP 8.2+. OpenAI and Anthropic work out of the box; every
+other provider needs its Symfony AI bridge package, which the admin form names when it's missing.
 
-The Symfony AI bridges for **OpenAI** and **Anthropic** are installed with the module, so those
-two providers work out of the box. Every other provider needs its bridge package installed
-before the bundled client can call it — the admin form names the exact package when it is
-missing. Because the bridges build on symfony/ai-platform, whose Symfony 7.3+ components
-conflict with the Symfony line older Magento releases pin, the module requires
-**Magento 2.4.7+** (`magento/framework` 103.0.7) or a Mage-OS release based on it.
+The client is built on [symfony/ai-platform](https://github.com/symfony/ai) 0.14, which is
+experimental. This module's `Api` interfaces absorb its changes; code that reaches the Symfony
+platform directly does not.
 
 ## Usage
-
-If you have configured AI backends, you can fetch the configuration using these methods:
-
-```php
-use MageOS\AiBase\Api\AiServiceSelectorInterface;
-
-AiServiceSelectorInterface::getAll(): array
-AiServiceSelectorInterface::getByCode(string $code): array
-AiServiceSelectorInterface::getById(string $id): ?AiServiceInterface
-```
-
-`getAll()` and `getByCode()` return an array of `\MageOS\AiBase\Api\Data\AiServiceInterface` objects (multiple entries per code are possible because admins can register the same backend more than once); `getById()` returns the single row with that id, or `null` once the admin deletes it.
-
-None of them return a service an administrator has **disabled**. A disabled row keeps its id and its
-credentials and stays in the admin form, but it is not a service anything may call, so it is absent
-from every lookup here rather than being something each caller has to check. A row can also be given
-a **name** for the purpose it serves, which is what an administrator recognises when your module asks
-them to pick one:
-
-```php
-$service->getLabel();     // 'Chat AI', or null when unnamed
-$service->isEnabled();    // always true for anything this selector hands you
-```
-
-```php
-use MageOS\AiBase\Api\AiServiceSelectorInterface;
-
-final class MyAiFunctionality
-{
-    public function __construct(
-        private readonly AiServiceSelectorInterface $aiServiceSelector,
-    ) {}
-
-    public function doSomething(): void
-    {
-        $openAiServices = $this->aiServiceSelector->getByCode('openai');
-
-        foreach ($openAiServices as $service) {
-            $config = $service->getConfiguration();
-            // $config = ['api_key' => '...', 'model' => 'gpt-4o', ...]
-        }
-    }
-}
-```
-
-### Making AI calls
-
-Instead of reading raw configuration, consumer modules can request a ready-to-use,
-provider-agnostic client. The bundled implementation is backed by
-[symfony/ai-platform](https://github.com/symfony/ai), which ships with the module through the
-required OpenAI and Anthropic bridges. Bridges for the other providers are *soft* dependencies:
-install one only when you use that provider, e.g.:
-
-```bash
-composer require symfony/ai-gemini-platform
-```
-
-> **symfony/ai-platform is experimental.** Experimental features are not covered by Symfony's
-> [Backward Compatibility Promise](https://symfony.com/doc/current/contributing/code/bc.html).
->
-> `MageOS\AiBase\Api\*` is this module's own contract and is insulated from that: when Symfony
-> changes, the adapter behind these interfaces absorbs it. Code written against symfony/ai types
-> directly (see [the escape hatch](#reaching-the-platform-directly)) is not insulated, and has to
-> be re-verified on every symfony/ai-platform upgrade. Pin the version either way.
 
 ```php
 use MageOS\AiBase\Api\AiClientFactoryInterface;
 
-final class MyAiFunctionality
+class ProductSummary
 {
     public function __construct(
         private readonly AiClientFactoryInterface $aiClientFactory,
-    ) {}
+    ) {
+    }
 
-    public function doSomething(): string
+    public function summarize(string $description): string
     {
-        // First configured service, or pass a code: create('openai')
-        $client = $this->aiClientFactory->create();
-
-        return $client->complete('Summarize this product description: ...');
+        return $this->aiClientFactory
+            ->create(consumer: 'Vendor_ProductSummary')
+            ->complete('Summarize this product description: ' . $description);
     }
 }
 ```
 
-### Letting the admin pick a service
-
-Consumer modules do not have to hardcode a service code. Point a `select` field in your own
-`system.xml` at the option source this module ships, and every configured service shows up in it:
-
-```xml
-<field id="ai_service" translate="label" type="select" sortOrder="10"
-       showInDefault="1" showInWebsite="1" showInStore="1">
-    <label>AI service</label>
-    <source_model>MageOS\AiBase\Model\Config\Source\ConfiguredService</source_model>
-</field>
-```
-
-Options are labelled by provider and model (`OpenAI (gpt-4o)`); a row whose Symfony AI bridge is
-not installed stays selectable but says so. Use
-`MageOS\AiBase\Model\Config\Source\ConfiguredServiceWithAutomatic` instead to prepend an
-empty-valued *Automatic (first usable service)* option.
-
-The stored value is the row id, because the service code cannot tell two rows of the same
-provider apart. Resolve it back with either of:
-
-```php
-$this->aiClientFactory->createById($serviceId);       // ready-to-use client
-$this->aiServiceSelector->getById($serviceId);        // raw configuration, or null when deleted
-```
-
-See [docs/CONSUMING.md](docs/CONSUMING.md) for the full example.
-
-### Conversations, tools and streaming
-
-`complete()` is the single-turn convenience. For anything more, `chat()` takes a conversation
-and returns text, requested tool calls, token counts and the stop reason, and `streamChat()`
-returns a generator of typed chunks:
-
-```php
-$request = $this->chatRequestBuilderFactory->create()
-    ->withSystemMessage('You are a Magento support assistant.')
-    ->withUserMessage($question)
-    ->withTool('get_orders', 'Lists orders by status', $schema)
-    ->build();
-
-$response = $client->chat($request);
-$response->getText();
-$response->getToolCalls();
-$response->getUsage();
-$response->getFinishReason();     // normalized across providers; Length means truncated
-$response->getReasoning();        // opaque; withAssistantTurn() carries it into the next turn
-
-$stream = $client->streamChat($request);
-foreach ($stream as $chunk) {
-    // StreamChunkType::Text | Thinking | ThinkingStart | ToolCall | ToolCallStart | Usage
-}
-$turn = $stream->getReturn();     // the assembled ChatResponseInterface, ready to append
-```
-
-This module never executes tools. It reports what the model asked for; you run it and feed the
-result back with `ChatRequestInterface::withToolResult()`, after putting the model's own turn
-back with `withAssistantTurn()`. Streamed tool calls arrive complete, with arguments already
-decoded, so there is no SSE parsing to do. Full example with the tool loop:
-[docs/CONSUMING.md](docs/CONSUMING.md).
-
-The options every provider has (`max_tokens`, `temperature`, `top_p`, `stop`, `tool_choice`,
-`reasoning_effort`) are translated to whatever the configured backend calls them, so moving a
-workload between providers does not silently change the cap it runs under, or force a tool call
-one backend cannot express. Anything else passes through untouched.
-
-Provider bridges are registered per service code in `etc/di.xml` (`bridges` argument of
-`Model\Client\BridgeRegistry`); third-party modules can register additional providers there,
-or replace the implementation entirely by preferencing `AiClientFactoryInterface`.
-
-### Reaching the platform directly
-
-symfony/ai-platform does much more than chat and streaming: executed tool loops via
-`symfony/ai-agent`, message stores via `symfony/ai-chat`, structured output, embeddings, vector
-stores, image and audio. Rather than mirror all of that, this module hands over the platform it
-already built for you, with credentials resolved and the right bridge selected:
-
-```php
-use MageOS\AiBase\Api\PlatformAwareInterface;
-
-$client = $this->aiClientFactory->createById($serviceId);
-
-if ($client instanceof PlatformAwareInterface) {
-    $result = $client->getPlatform()->invoke(
-        $client->getModel(),
-        $messageBag,
-        $client->normalizeOptions(['max_tokens' => 400]),   // keeps the option translation
-    );
-}
-```
-
-The `instanceof` check is the point: it makes the coupling deliberate, and a store that
-preferences its own client stack simply does not implement the interface.
-
-**Everything past `getPlatform()` is outside this module's compatibility promise**, for the
-reason in the note above. `normalizeOptions()` is offered separately because calling the platform
-directly otherwise opts you out of the option translation too, and that is the piece most worth
-keeping. Full example, including a `symfony/ai-agent` loop:
-[docs/CONSUMING.md](docs/CONSUMING.md).
-
-### Credential encryption
-
-Credential fields are encrypted at rest with Magento's `EncryptorInterface` when the
-configuration is saved. A field is treated as a credential when its field descriptor
-opts in via the `encrypted` option (`FieldDescriptorInterface::isEncrypted()`); the
-bundled providers flag their `api_key` field. Third-party providers should pass
-`'encrypted' => true` when building credential field descriptors — encrypted fields
-are also always rendered as password inputs in the admin form. For rows whose provider
-schema is not registered (e.g. the provider module was removed), a field whose name ends
-in a common credential word (`api_key`, `client_secret`, `access_token`, `password`,
-`credential`, `bearer` and the like; see [docs/PROVIDERS.md](docs/PROVIDERS.md) for the
-full rule) is treated as a credential as a fallback.
-Values saved before encryption was introduced are detected and returned as-is, and are
-re-encrypted the next time the configuration is saved in the admin.
-
-In the admin form, stored credentials are displayed as an obscured `******` placeholder
-instead of the real value. Saving the form without retyping a credential keeps the
-previously stored value; entering a new value replaces it. If `base_url`/`endpoint` is
-edited in the same save, the previously stored credential is not carried over — this
-stops a redirected endpoint from reading back a credential it was never issued.
-
-### Testing a connection
-
-Each saved service row in the admin form shows a **Test Connection** button that sends a
-minimal prompt to the provider and reports the latency and response (or the error) inline.
-Only saved rows can be tested, because the client factory reads saved configuration; when
-several rows share a service code, the first configured row of that code is used. The
-feature relies on the client layer, so it requires `symfony/ai-platform` — if the library
-is not installed, the error message shown by the button names the exact package to install.
-A failure at the provider or on the wire is reported by kind (a rejected key, a rate limit, an
-unreachable host, a rejected request); the full error, which can include the request URL, goes to
-the Magento log rather than the page. The same applies to **Refresh Models** below.
-
-### Refreshing model lists
-
-Saved rows of services that support it also show a **Refresh Models** button. It fetches the
-provider's current model list live (using the saved credentials) and updates the row's model
-field — refreshing is strictly manual; the module never fetches model lists automatically
-or on a schedule. Where the model field is a dropdown (OpenAI, Anthropic) the fetched
-list replaces its options. Where it is free text because the catalogue cannot be known ahead
-of time (OpenRouter, and self-hosted Ollama and LM Studio) the list is offered as autocomplete
-suggestions, so you can still type a model the provider has not listed. Other backends
-(e.g. Azure, whose listing endpoint is resource-specific) simply
-don't show the button. The fetched list is stored per service code (with a fetched-at
-timestamp) and keeps feeding the form until the next refresh; when nothing has been fetched
-yet, the curated default model list built into each service remains the fallback. Third-party
-providers can opt in by implementing `MageOS\AiBase\Api\ModelListProviderInterface` alongside
-their service configuration class.
-
-### Usage tracking
-
-Every call made through the bundled client is recorded — token counts and metadata only, never
-prompt or response content — and shown on **Reports > AI Token Usage**: a dashboard with totals,
-period-over-period change, a trend chart with a line per consumer or per service row, and
-breakdowns by consumer and service, plus a grid of individual calls.
-
-![The AI Token Usage dashboard: totals for the month, a trend with one line per consumer and a By consumer / By service selector, and bar charts breaking the period down by consumer and by service](docs/images/admin-usage-dashboard.png)
-
-A `bin/magento mageos:ai:usage` CLI report and a scheduled cleanup job (configurable retention)
-round it out. See [docs/USAGE-TRACKING.md](docs/USAGE-TRACKING.md) for what is and is not
-recorded, and [docs/CONSUMING.md](docs/CONSUMING.md#naming-your-module-as-a-consumer) for naming
-your own module's calls.
+`chat()` and `streamChat()` cover conversations, tools and streaming. The
+[Consumer Guide](docs/CONSUMING.md) has the full picture.
 
 ## Documentation
 
-- [Provider Integration & Customization Guide](docs/PROVIDERS.md) — add a provider, wire a client bridge, opt into model refresh, customization recipes
-- [Consumer Guide](docs/CONSUMING.md) — make AI calls from your module, handle failure modes, test your integration
-- [Usage Tracking](docs/USAGE-TRACKING.md) — what is recorded, what is not, where to see it, configuration, retention
-- [Architecture](docs/ARCHITECTURE.md) — component map, data flows, storage formats, security model, design decisions
+- [Consumer Guide](docs/CONSUMING.md): make AI calls, handle failures, let the admin pick a service, what's stable
+- [Provider Guide](docs/PROVIDERS.md): add a provider, wire a client bridge, the admin form
+- [Usage Tracking](docs/USAGE-TRACKING.md): what is recorded, where to see it, retention
+- [Architecture](docs/ARCHITECTURE.md): components, data flows, security model, design decisions
 
 ## Contributing
 
@@ -287,5 +81,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) and our [Code of Conduct](CODE_OF_CONDUCT
 
 ## Security
 
-Security issues: see [SECURITY.md](SECURITY.md). Please do **not** file public issues for vulnerabilities.
-
+Please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.

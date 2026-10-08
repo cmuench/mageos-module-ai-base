@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Api\Data;
 
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
-
 /**
  * How {@see \MageOS\AiBase\Api\UsageStatsInterface::getTimeSeries()} buckets a period.
  *
@@ -24,27 +22,12 @@ enum Granularity
      */
     case Month;
 
-    /**
-     * The value {@see UsageDailyRepositoryInterface::seriesRange()} expects for this granularity.
-     *
-     * Reuses task 010's constants instead of declaring parallel ones of its own, so the two never
-     * drift apart.
-     *
-     * @return string
-     */
-    public function toDailyRepositoryGranularity(): string
-    {
-        return match ($this) {
-            self::Day => UsageDailyRepositoryInterface::GRANULARITY_DAY,
-            self::Month => UsageDailyRepositoryInterface::GRANULARITY_MONTH,
-        };
-    }
 
     /**
      * The `date()` format that labels one bucket of this granularity.
      *
      * `Y-m-d` for a day, `Y-m` for a month, matching the `period` label
-     * {@see UsageDailyRepositoryInterface::seriesRange()} already returns, so a caller merging rows
+     * {@see UsageDailyReportInterface::seriesRange()} already returns, so a caller merging rows
      * from both tables never has to reconcile two label formats.
      *
      * @return string

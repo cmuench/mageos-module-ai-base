@@ -5,17 +5,17 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Client;
 
 use Magento\Framework\Exception\LocalizedException;
-use Magento\Framework\Exception\NoSuchEntityException;
-use Magento\Store\Model\StoreManagerInterface;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Api\Data\ChatRequestInterface;
 use MageOS\AiBase\Api\Data\ChatResponseInterface;
 use MageOS\AiBase\Api\Data\MessageRole;
 use MageOS\AiBase\Api\Data\TokenUsageInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Chat\ChatMessage;
 use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Usage\UsageRecord;
+use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -42,8 +42,9 @@ class RecordingAiClient implements AiClientInterface
     /**
      * @param AiClientInterface $delegate The client every call is actually made through
      * @param UsageRecordRepositoryInterface $repository
-     * @param StoreManagerInterface $storeManager Names the store a call ran under; a call made
-     *        outside any store scope (admin, cron, CLI) is recorded under store id 0
+     * @param UsageStoreResolver $storeResolver Names the store a call is attributed to; a call made
+     *        outside any storefront store (admin, cron, CLI) is recorded under store id 0 unless
+     *        that code deliberately switched to another store
      * @param LoggerInterface $logger A recording failure is logged here rather than thrown, since
      *        a problem writing the log must never turn an AI call that already succeeded into one
      *        the caller sees as failed
@@ -51,7 +52,7 @@ class RecordingAiClient implements AiClientInterface
     public function __construct(
         private readonly AiClientInterface $delegate,
         private readonly UsageRecordRepositoryInterface $repository,
-        private readonly StoreManagerInterface $storeManager,
+        private readonly UsageStoreResolver $storeResolver,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -249,7 +250,7 @@ class RecordingAiClient implements AiClientInterface
                 serviceId: $this->delegate->getServiceId(),
                 serviceCode: $this->delegate->getServiceCode(),
                 model: $model,
-                storeId: $this->resolveStoreId(),
+                storeId: $this->storeResolver->getStoreId(),
                 consumer: $consumer,
                 inputTokens: $usage?->getPromptTokens(),
                 outputTokens: $usage?->getCompletionTokens(),
@@ -269,23 +270,6 @@ class RecordingAiClient implements AiClientInterface
                 ),
                 ['exception' => $e],
             );
-        }
-    }
-
-    /**
-     * The store this call ran under, or the admin store when none is in scope.
-     *
-     * Cron and CLI report no current store the same way, which is why store id 0 is what this
-     * column already means everywhere else it is read, rather than a value invented for this class.
-     *
-     * @return int
-     */
-    private function resolveStoreId(): int
-    {
-        try {
-            return (int) $this->storeManager->getStore()->getId();
-        } catch (NoSuchEntityException) {
-            return 0;
         }
     }
 }

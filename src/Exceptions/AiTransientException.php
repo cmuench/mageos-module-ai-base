@@ -2,7 +2,9 @@
 
 declare(strict_types=1);
 
-namespace MageOS\AiBase\Model\Client;
+namespace MageOS\AiBase\Exceptions;
+
+use MageOS\AiBase\Model\Client\AiExceptionMapper;
 
 /**
  * The provider failed in a way that is usually temporary: a 5xx response, an overloaded model, a
@@ -12,6 +14,8 @@ namespace MageOS\AiBase\Model\Client;
  * {@see AiInvalidRequestException}, which repeat on the identical request. {@see AiExceptionMapper}
  * builds this from symfony/ai's `ServerException` and `IncompleteStreamException`, and from the
  * HTTP client's `TransportExceptionInterface`.
+ *
+ * @api
  */
 class AiTransientException extends AiServiceException
 {

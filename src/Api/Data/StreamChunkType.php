@@ -9,6 +9,8 @@ namespace MageOS\AiBase\Api\Data;
  *
  * Thinking is separate from text because it is the model's reasoning rather than its answer, and
  * a consumer rendering it into a chat window has to be able to style or suppress it.
+ *
+ * @api
  */
 enum StreamChunkType: string
 {

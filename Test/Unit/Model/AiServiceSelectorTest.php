@@ -10,8 +10,10 @@ use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Api\Data\AiServiceInterfaceFactory;
 use MageOS\AiBase\Model\AiService;
 use MageOS\AiBase\Model\AiServiceSelector;
+use MageOS\AiBase\Model\Config\ConfigScope;
 use MageOS\AiBase\Model\Config\SensitiveDataProcessor;
 use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\ServiceScope;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -20,16 +22,66 @@ final class AiServiceSelectorTest extends TestCase
 {
     private ScopeConfigInterface&MockObject $scopeConfig;
     private AiServiceInterfaceFactory&MockObject $aiServiceFactory;
+    private ServiceScope $serviceScope;
     private AiServiceSelector $subject;
 
     protected function setUp(): void
     {
+        $this->serviceScope = new ServiceScope();
         $this->scopeConfig = $this->createMock(ScopeConfigInterface::class);
         $this->aiServiceFactory = $this->createMock(AiServiceInterfaceFactory::class);
         $this->subject = new AiServiceSelector(
             $this->scopeConfig,
             $this->aiServiceFactory,
             new SensitiveDataProcessor($this->createMock(EncryptorInterface::class), new ServiceRegistry()),
+            $this->serviceScope,
+        );
+    }
+
+    /**
+     * Outside an admin action nothing establishes a scope, and the public contract applies: store
+     * scope, in whatever store is ambient.
+     */
+    public function test_reads_at_ambient_store_scope_when_no_scope_is_established(): void
+    {
+        $asked = [];
+        $this->scopeConfig->method('getValue')->willReturnCallback(
+            static function (string $path, string $scope, ?string $code = null) use (&$asked) {
+                $asked[] = [$path, $scope, $code];
+
+                return null;
+            }
+        );
+
+        $this->subject->getAll();
+
+        self::assertSame([['mageos_ai/services/configuration', 'store', null]], $asked);
+    }
+
+    /**
+     * Test Connection, Refresh Models and the option source act on the scope the config page is
+     * showing, which they establish around the lookup.
+     */
+    public function test_reads_at_the_scope_an_admin_action_established(): void
+    {
+        $asked = [];
+        $this->scopeConfig->method('getValue')->willReturnCallback(
+            static function (string $path, string $scope, ?string $code = null) use (&$asked) {
+                $asked[] = [$path, $scope, $code];
+
+                return null;
+            }
+        );
+
+        $this->serviceScope->run(new ConfigScope('websites', 2, 'second'), fn (): array => $this->subject->getAll());
+        $this->serviceScope->run(new ConfigScope('default', 0, ''), fn (): array => $this->subject->getAll());
+
+        self::assertSame(
+            [
+                ['mageos_ai/services/configuration', 'websites', 'second'],
+                ['mageos_ai/services/configuration', 'default', null],
+            ],
+            $asked
         );
     }
 

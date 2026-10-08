@@ -8,7 +8,6 @@ use MageOS\AiBase\Api\Data\Granularity;
 use MageOS\AiBase\Api\Data\Period;
 use MageOS\AiBase\Api\Data\UsageBreakdownInterface;
 use MageOS\AiBase\Api\Data\UsageTotalsInterface;
-use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use MageOS\AiBase\Api\UsageStatsInterface;
 
@@ -16,7 +15,7 @@ use MageOS\AiBase\Api\UsageStatsInterface;
  * Implementation of {@see UsageStatsInterface}.
  *
  * The hard part this class exists for: a {@see Period} can straddle the boundary between
- * {@see UsageRecordRepositoryInterface} (the raw log) and {@see UsageDailyRepositoryInterface}
+ * {@see UsageRecordReportInterface} (the raw log) and {@see UsageDailyReportInterface}
  * (the roll-up). Every public method here queries both repositories and merges the rows in PHP,
  * but the aggregation itself always happens in SQL inside those two repositories — this class
  * never sums a raw row directly, only the small pre-aggregated totals each repository call
@@ -33,15 +32,20 @@ use MageOS\AiBase\Api\UsageStatsInterface;
 class UsageStats implements UsageStatsInterface
 {
     /**
-     * @param UsageRecordRepositoryInterface $rawUsageRepository The raw `mageos_ai_usage_log` side.
-     * @param UsageDailyRepositoryInterface $dailyUsageRepository The aggregated
-     *        `mageos_ai_usage_daily` side.
-     * @param \Magento\Framework\Stdlib\DateTime\TimezoneInterface $timezone Store timezone the daily
-     *        table's window bounds are resolved in; see {@see localBound()}.
+     * @param UsageRecordRepositoryInterface $rawUsageRepository The raw `mageos_ai_usage_log`
+     *        side's oldest timestamp, which is where the daily side's window ends.
+     * @param UsageRecordReportInterface $rawUsageReport The raw `mageos_ai_usage_log` side's
+     *        range aggregation.
+     * @param UsageDailyReportInterface $dailyUsageReport The aggregated `mageos_ai_usage_daily`
+     *        side.
+     * @param \Magento\Framework\Stdlib\DateTime\TimezoneInterface $timezone Source of the
+     *        reporting timezone the daily table's window bounds are resolved in; see
+     *        {@see localBound()} and {@see ReportingTimezone}.
      */
     public function __construct(
         private readonly UsageRecordRepositoryInterface $rawUsageRepository,
-        private readonly UsageDailyRepositoryInterface $dailyUsageRepository,
+        private readonly UsageRecordReportInterface $rawUsageReport,
+        private readonly UsageDailyReportInterface $dailyUsageReport,
         private readonly \Magento\Framework\Stdlib\DateTime\TimezoneInterface $timezone,
     ) {
     }
@@ -52,8 +56,8 @@ class UsageStats implements UsageStatsInterface
     public function getTotals(Period $period, ?int $storeId = null): UsageTotalsInterface
     {
         return $this->rowsToTotals([
-            $this->rawUsageRepository->sumRange($period->getStart(), $period->getEnd(), null, $storeId),
-            $this->dailyUsageRepository->sumRange(
+            $this->rawUsageReport->sumRange($period->getStart(), $period->getEnd(), null, $storeId),
+            $this->dailyUsageReport->sumRange(
                 $this->localBound($period->getStart()),
                 $this->localBound($this->dailyWindowEnd($period)),
                 null,
@@ -67,7 +71,7 @@ class UsageStats implements UsageStatsInterface
      */
     public function getByConsumer(Period $period, ?int $storeId = null): array
     {
-        return $this->mergedBreakdown($period, UsageRecordRepositoryInterface::GROUP_BY_CONSUMER, $storeId);
+        return $this->mergedBreakdown($period, UsageRecordReportInterface::GROUP_BY_CONSUMER, $storeId);
     }
 
     /**
@@ -75,7 +79,7 @@ class UsageStats implements UsageStatsInterface
      */
     public function getByService(Period $period, ?int $storeId = null): array
     {
-        return $this->mergedBreakdown($period, UsageRecordRepositoryInterface::GROUP_BY_SERVICE, $storeId);
+        return $this->mergedBreakdown($period, UsageRecordReportInterface::GROUP_BY_SERVICE, $storeId);
     }
 
     /**
@@ -86,10 +90,10 @@ class UsageStats implements UsageStatsInterface
         Granularity $granularity,
         ?int $storeId = null
     ): array {
-        $dailyBuckets = $this->dailyUsageRepository->seriesRange(
+        $dailyBuckets = $this->dailyUsageReport->seriesRange(
             $this->localBound($period->getStart()),
             $this->localBound($this->dailyWindowEnd($period)),
-            $granularity->toDailyRepositoryGranularity(),
+            $this->dailyReportGranularity($granularity),
             $storeId
         );
 
@@ -113,8 +117,8 @@ class UsageStats implements UsageStatsInterface
      * result by total tokens descending.
      *
      * @param Period $period
-     * @param string $groupBy {@see UsageRecordRepositoryInterface::GROUP_BY_CONSUMER} or
-     *        {@see UsageRecordRepositoryInterface::GROUP_BY_SERVICE}.
+     * @param string $groupBy {@see UsageRecordReportInterface::GROUP_BY_CONSUMER} or
+     *        {@see UsageRecordReportInterface::GROUP_BY_SERVICE}.
      * @param int|null $storeId Narrow to one store, or `null` for every store
      * @return UsageBreakdownInterface[]
      */
@@ -123,8 +127,8 @@ class UsageStats implements UsageStatsInterface
         $rowsByGroupValue = $this->groupRowsByKey(
             $groupBy,
             [
-                ...$this->rawUsageRepository->groupRange($period->getStart(), $period->getEnd(), $groupBy, $storeId),
-                ...$this->dailyUsageRepository->groupRange(
+                ...$this->rawUsageReport->groupRange($period->getStart(), $period->getEnd(), $groupBy, $storeId),
+                ...$this->dailyUsageReport->groupRange(
                     $this->localBound($period->getStart()),
                     $this->localBound($this->dailyWindowEnd($period)),
                     $groupBy,
@@ -149,7 +153,7 @@ class UsageStats implements UsageStatsInterface
 
     /**
      * Builds the raw side of a time series through
-     * {@see UsageRecordRepositoryInterface::seriesRange()} (task 021), bounded to the (small, by
+     * {@see UsageRecordReportInterface::seriesRange()} (task 021), bounded to the (small, by
      * design: the raw retention window, 30 days by default) portion of the period the raw table
      * actually covers.
      *
@@ -174,10 +178,10 @@ class UsageStats implements UsageStatsInterface
             return [];
         }
 
-        return $this->rawUsageRepository->seriesRange(
+        return $this->rawUsageReport->seriesRange(
             $rawWindowStart,
             $period->getEnd(),
-            $granularity->toDailyRepositoryGranularity(),
+            $this->dailyReportGranularity($granularity),
             $storeId
         );
     }
@@ -238,10 +242,11 @@ class UsageStats implements UsageStatsInterface
     }
 
     /**
-     * A window bound restated in the store's own timezone.
+     * A window bound restated in the reporting timezone.
      *
-     * `mageos_ai_usage_daily.usage_date` holds the *store-local* calendar date the roll-up
-     * computed, while a {@see Period} bound is a UTC instant. The daily repository turns its
+     * `mageos_ai_usage_daily.usage_date` holds the calendar date the roll-up computed in the
+     * reporting timezone {@see ReportingTimezone} pins to Default Config, while a {@see Period}
+     * bound is a UTC instant. The daily repository turns its
      * arguments into a date with `format('Y-m-d')`, so handing it a UTC instant asks for the wrong
      * day wherever the store is not on UTC: in Europe/Amsterdam the local first of January is
      * 23:00 UTC on the thirty-first of December, and a year-to-date window would open a day early
@@ -254,7 +259,7 @@ class UsageStats implements UsageStatsInterface
      */
     private function localBound(\DateTimeImmutable $instant): \DateTimeImmutable
     {
-        return $instant->setTimezone(new \DateTimeZone($this->timezone->getConfigTimezone()));
+        return $instant->setTimezone(ReportingTimezone::resolve($this->timezone));
     }
 
     /**
@@ -447,7 +452,7 @@ class UsageStats implements UsageStatsInterface
         return $this->groupedTimeSeries(
             $period,
             $granularity,
-            UsageRecordRepositoryInterface::GROUP_BY_CONSUMER,
+            UsageRecordReportInterface::GROUP_BY_CONSUMER,
             $limit,
             $storeId
         );
@@ -465,7 +470,7 @@ class UsageStats implements UsageStatsInterface
         return $this->groupedTimeSeries(
             $period,
             $granularity,
-            UsageRecordRepositoryInterface::GROUP_BY_SERVICE,
+            UsageRecordReportInterface::GROUP_BY_SERVICE,
             $limit,
             $storeId
         );
@@ -490,10 +495,10 @@ class UsageStats implements UsageStatsInterface
     ): array {
         $labels = $this->periodLabels($period, $granularity);
         $rows = [
-            ...$this->dailyUsageRepository->seriesRangeGrouped(
+            ...$this->dailyUsageReport->seriesRangeGrouped(
                 $this->localBound($period->getStart()),
                 $this->localBound($this->dailyWindowEnd($period)),
-                $granularity->toDailyRepositoryGranularity(),
+                $this->dailyReportGranularity($granularity),
                 $groupBy,
                 $storeId
             ),
@@ -547,7 +552,7 @@ class UsageStats implements UsageStatsInterface
             return [];
         }
 
-        $breakdown = $groupBy === UsageRecordRepositoryInterface::GROUP_BY_SERVICE
+        $breakdown = $groupBy === UsageRecordReportInterface::GROUP_BY_SERVICE
             ? $this->getByService($period, $storeId)
             : $this->getByConsumer($period, $storeId);
 
@@ -584,10 +589,10 @@ class UsageStats implements UsageStatsInterface
             return [];
         }
 
-        return $this->rawUsageRepository->seriesRangeGrouped(
+        return $this->rawUsageReport->seriesRangeGrouped(
             $rawWindowStart,
             $period->getEnd(),
-            $granularity->toDailyRepositoryGranularity(),
+            $this->dailyReportGranularity($granularity),
             $groupBy,
             $storeId
         );
@@ -603,5 +608,22 @@ class UsageStats implements UsageStatsInterface
     private function toRowString(array $row, string $key): string
     {
         return (string) ($row[$key] ?? '');
+    }
+
+    /**
+     * The value {@see UsageDailyReportInterface::seriesRange()} expects for this granularity.
+     *
+     * Lives here rather than on the public enum, because the report interface is internal and the
+     * enum is not.
+     *
+     * @param Granularity $granularity
+     * @return string
+     */
+    private function dailyReportGranularity(Granularity $granularity): string
+    {
+        return match ($granularity) {
+            Granularity::Day => UsageDailyReportInterface::GRANULARITY_DAY,
+            Granularity::Month => UsageDailyReportInterface::GRANULARITY_MONTH,
+        };
     }
 }

@@ -10,7 +10,12 @@ use Magento\Config\Model\Config\Structure\Element\Field;
 use Magento\Framework\App\Config as AppConfig;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\Config\Storage\WriterInterface;
+use Magento\Framework\Encryption\EncryptorInterface;
+use Magento\Framework\Exception\LocalizedException;
+use Magento\Framework\Exception\ValidatorException;
 use Magento\Framework\ObjectManagerInterface;
+use Magento\Store\Model\ScopeInterface;
+use Magento\Store\Model\StoreManagerInterface;
 use Magento\TestFramework\Fixture\AppArea;
 use Magento\TestFramework\Helper\Bootstrap;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
@@ -37,6 +42,11 @@ final class CredentialStorageTest extends TestCase
     private const CONFIG_PATH = 'mageos_ai/services/configuration';
     private const API_KEY = 'sk-integration-secret';
 
+    /**
+     * A service code no module registers, standing in for a provider whose module was removed.
+     */
+    private const REMOVED_PROVIDER = 'acme_removed';
+
     private ObjectManagerInterface $objectManager;
 
     protected function setUp(): void
@@ -47,6 +57,11 @@ final class CredentialStorageTest extends TestCase
     protected function tearDown(): void
     {
         $this->objectManager->get(WriterInterface::class)->delete(self::CONFIG_PATH);
+        $this->objectManager->get(WriterInterface::class)->delete(
+            self::CONFIG_PATH,
+            ScopeInterface::SCOPE_WEBSITES,
+            $this->defaultWebsiteId()
+        );
         $this->objectManager->get(AppConfig::class)->clean();
     }
 
@@ -172,9 +187,200 @@ final class CredentialStorageTest extends TestCase
     }
 
     /**
+     * A complete form post carries both markers; neither may end up stored as if it were a row.
+     */
+    public function test_a_fully_rendered_form_post_is_saved_without_its_markers(): void
+    {
+        $this->saveServices([
+            EncryptedServices::EMPTY_MARKER => '',
+            EncryptedServices::RENDERED_MARKER => '1',
+            '_row1' => ['openai' => ['api_key' => self::API_KEY, 'model' => 'gpt-4o']],
+        ]);
+
+        $stored = json_decode($this->storedValue(), true);
+        self::assertSame(['_row1'], array_keys($stored));
+    }
+
+    /**
+     * The form's script failed before it rendered the stored rows, so the post carries only the
+     * server-rendered empty marker. Saving that used to delete every service and credential.
+     */
+    public function test_a_form_post_from_a_form_that_did_not_finish_rendering_keeps_what_is_stored(): void
+    {
+        $this->saveServices([
+            '_row1' => ['openai' => ['api_key' => self::API_KEY, 'model' => 'gpt-4o']],
+        ]);
+        $before = $this->storedValue();
+
+        try {
+            $this->saveServices([EncryptedServices::EMPTY_MARKER => '']);
+            self::fail('A post from a form that did not finish rendering was accepted.');
+        } catch (ValidatorException) {
+        }
+
+        $this->objectManager->get(AppConfig::class)->clean();
+        self::assertSame($before, $this->storedValue());
+    }
+
+    /**
+     * Leaving a key masked while pointing its row at another host would restore the stored key and
+     * hand it to that host on the next Test Connection. The registered provider's descriptor is
+     * what marks `base_url` as the field to watch, so this also asserts the flag reaches the guard
+     * through the real registry.
+     */
+    public function test_a_masked_credential_is_not_carried_over_to_a_new_endpoint(): void
+    {
+        $this->saveServices([
+            '_row1' => [
+                'openai_compatible' => [
+                    'api_key' => self::API_KEY,
+                    'base_url' => 'https://gateway.internal',
+                    'model' => 'llama3',
+                ],
+            ],
+        ]);
+        $before = $this->storedValue();
+
+        try {
+            $this->saveServices([
+                '_row1' => [
+                    'openai_compatible' => [
+                        'api_key' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER,
+                        'base_url' => 'http://attacker.test',
+                        'model' => 'llama3',
+                    ],
+                ],
+            ]);
+            self::fail('A masked credential was carried over to a new endpoint.');
+        } catch (LocalizedException $exception) {
+            self::assertStringContainsString('has to be entered again', $exception->getMessage());
+        }
+
+        $this->objectManager->get(AppConfig::class)->clean();
+        self::assertSame($before, $this->storedValue());
+    }
+
+    /**
+     * A row whose provider module was removed has no schema, so the form cannot post it. An
+     * unrelated Save Config used to treat that as a deletion and drop the row with its encrypted
+     * credential (GitHub issue #65); it must now be carried over exactly as stored.
+     */
+    public function test_an_unrelated_save_keeps_a_row_whose_provider_is_not_registered(): void
+    {
+        $removedRow = $this->seedOpenAiAndRemovedProviderRows();
+
+        $this->saveServices([
+            EncryptedServices::EMPTY_MARKER => '',
+            EncryptedServices::RENDERED_MARKER => '1',
+            '_openai' => ['openai' => ['api_key' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'model' => 'gpt-4o']],
+        ]);
+
+        $stored = json_decode($this->storedValue(), true);
+        self::assertSame(['_openai', '_acme'], array_keys($stored));
+        self::assertSame($removedRow, json_encode($stored['_acme']), 'The kept row changed on the way through.');
+    }
+
+    /**
+     * Deleting every row the form shows posts only the markers; the row the form could not offer
+     * for editing stays.
+     */
+    public function test_removing_every_visible_row_keeps_a_row_whose_provider_is_not_registered(): void
+    {
+        $this->seedOpenAiAndRemovedProviderRows();
+
+        $this->saveServices([EncryptedServices::EMPTY_MARKER => '', EncryptedServices::RENDERED_MARKER => '1']);
+
+        self::assertSame(['_acme'], array_keys(json_decode($this->storedValue(), true)));
+    }
+
+    /**
+     * The placeholder's delete button posts the row id under the deletion marker, which is the
+     * deliberate way such a row is removed.
+     */
+    public function test_the_deletion_marker_removes_a_row_whose_provider_is_not_registered(): void
+    {
+        $this->seedOpenAiAndRemovedProviderRows();
+
+        $this->saveServices([
+            EncryptedServices::EMPTY_MARKER => '',
+            EncryptedServices::RENDERED_MARKER => '1',
+            EncryptedServices::DELETED_MARKER => ['_acme'],
+            '_openai' => ['openai' => ['api_key' => SensitiveDataProcessor::OBSCURED_PLACEHOLDER, 'model' => 'gpt-4o']],
+        ]);
+
+        self::assertSame(['_openai'], array_keys(json_decode($this->storedValue(), true)));
+    }
+
+    /**
+     * With "Use Default" ticked on a website, Magento saves nothing for the field there, so nothing
+     * runs that could keep or drop a row, and the default scope's value is left alone.
+     */
+    public function test_a_website_that_inherits_the_services_changes_nothing(): void
+    {
+        $this->seedOpenAiAndRemovedProviderRows();
+        $before = $this->storedValue();
+
+        $config = $this->objectManager->create(ConfigModel::class);
+        $config->setSection('mageos_ai');
+        $config->setWebsite((string) $this->defaultWebsiteId());
+        $config->setGroups(['services' => ['fields' => ['configuration' => [
+            'inherit' => '1',
+            'value' => [EncryptedServices::EMPTY_MARKER => '', EncryptedServices::RENDERED_MARKER => '1'],
+        ]]]]);
+        $config->save();
+        $this->objectManager->get(AppConfig::class)->clean();
+
+        self::assertSame($before, $this->storedValue());
+        self::assertSame(
+            $before,
+            (string) $this->objectManager->get(ScopeConfigInterface::class)->getValue(
+                self::CONFIG_PATH,
+                ScopeInterface::SCOPE_WEBSITES,
+                $this->defaultWebsiteId()
+            ),
+            'The website stopped inheriting the default services.'
+        );
+    }
+
+    /**
+     * Store an OpenAI row and a row for a provider that is not registered, the state an install is
+     * in after that provider's module was removed. Written to the database directly, since the
+     * save path would not accept a row for a provider it does not know of any more than the form.
+     *
+     * @return string The removed provider's row exactly as stored, JSON encoded
+     */
+    private function seedOpenAiAndRemovedProviderRows(): string
+    {
+        $this->saveServices([
+            '_openai' => ['openai' => ['api_key' => self::API_KEY, 'model' => 'gpt-4o']],
+        ]);
+        $stored = json_decode($this->storedValue(), true);
+        $stored['_acme'] = [
+            self::REMOVED_PROVIDER => [
+                'api_key' => $this->objectManager->get(EncryptorInterface::class)->encrypt('sk-acme-secret'),
+                '_label' => 'Old gateway',
+            ],
+        ];
+        $this->objectManager->get(WriterInterface::class)->save(self::CONFIG_PATH, json_encode($stored));
+        $this->objectManager->get(AppConfig::class)->clean();
+
+        return json_encode($stored['_acme']);
+    }
+
+    /**
+     * @return int
+     */
+    private function defaultWebsiteId(): int
+    {
+        return (int) $this->objectManager->get(StoreManagerInterface::class)
+            ->getDefaultStoreView()
+            ?->getWebsiteId();
+    }
+
+    /**
      * Save a services configuration the way the admin form posts it.
      *
-     * @param array<string, array<string, array<string, string>>> $rows
+     * @param array<string, string|array<array-key, mixed>> $rows
      * @return void
      */
     private function saveServices(array $rows): void

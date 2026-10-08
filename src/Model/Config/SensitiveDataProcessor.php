@@ -6,6 +6,7 @@ namespace MageOS\AiBase\Model\Config;
 
 use Magento\Framework\Encryption\EncryptorInterface;
 use Magento\Framework\Exception\LocalizedException;
+use MageOS\AiBase\Api\Data\FieldDescriptorInterface;
 use MageOS\AiBase\Model\ServiceRegistry;
 
 /**
@@ -14,7 +15,8 @@ use MageOS\AiBase\Model\ServiceRegistry;
  * Sensitivity is decided by the registered provider field schema: a field is sensitive
  * when its descriptor reports isEncrypted(). For service codes without a registered
  * schema, or for fields the schema does not describe, a field-name heuristic is used
- * as a fallback (see SENSITIVE_NAME_SUFFIXES).
+ * as a fallback (see SENSITIVE_NAME_SUFFIXES). Which fields name the host a row talks to is
+ * decided from isEndpoint(), plus FALLBACK_ENDPOINT_KEYS for every row.
  *
  * Shared by the config backend model (write path) and the service selector (read path).
  */
@@ -56,13 +58,17 @@ class SensitiveDataProcessor
     ];
 
     /**
-     * Fields naming the host a row's credentials are sent to.
+     * Fields assumed to name the host a row's credentials are sent to, for a row whose provider is
+     * no longer registered.
      *
-     * Moving one of these is what turns a stored credential into something the person editing the
-     * row can read back, which is why restoreRow() refuses to carry a masked value across a change
-     * to any of them.
+     * A registered provider says which of its fields are endpoints through
+     * FieldDescriptorInterface::isEndpoint(), so a third-party host field called `host`, `api_base`
+     * or `url` is guarded as well. These names are guarded on top of that, for every row: a row
+     * whose provider module was removed has no descriptors left but can still be edited and saved,
+     * and a provider written before the endpoint flag existed declares its `base_url` without it,
+     * yet had that field guarded by name all along.
      */
-    private const ENDPOINT_KEYS = ['base_url', 'endpoint'];
+    private const FALLBACK_ENDPOINT_KEYS = ['base_url', 'endpoint'];
 
     /**
      * Magento encryptor envelope, e.g. "0:3:<base64>". Values not matching this
@@ -71,9 +77,9 @@ class SensitiveDataProcessor
     private const ENCRYPTED_ENVELOPE_PATTERN = '/^\d+:\d+:.+$/';
 
     /**
-     * Lazily built map of service code => [field name => encrypted flag].
+     * Lazily built map of service code => [field name => descriptor].
      *
-     * @var array<string,array<string,bool>>|null
+     * @var array<string,array<string,FieldDescriptorInterface>>|null
      */
     private ?array $fieldSchema = null;
 
@@ -151,11 +157,13 @@ class SensitiveDataProcessor
      */
     public function restoreRow(string $serviceCode, array $configuration, array $previous): array
     {
-        $redirected = $this->isRedirected($configuration, $previous);
+        $redirected = $this->isRedirected($serviceCode, $configuration, $previous);
 
         foreach ($configuration as $key => $value) {
             if ($value === self::OBSCURED_PLACEHOLDER && $this->isSensitive($serviceCode, (string)$key)) {
-                if ($redirected) {
+                $stored = $previous[$key] ?? '';
+                $stored = is_string($stored) ? $stored : '';
+                if ($redirected && $stored !== '') {
                     throw new LocalizedException(
                         __(
                             'The endpoint of the "%1" service changed, so its %2 has to be entered '
@@ -166,8 +174,7 @@ class SensitiveDataProcessor
                         )
                     );
                 }
-                $stored = $previous[$key] ?? '';
-                $configuration[$key] = is_string($stored) ? $stored : '';
+                $configuration[$key] = $stored;
             }
         }
 
@@ -175,7 +182,34 @@ class SensitiveDataProcessor
     }
 
     /**
-     * Whether this save points an existing row at a different host.
+     * Names of the fields in a stored row that hold an encrypted credential.
+     *
+     * Re-encrypting after an encryption key change has to touch exactly the values encryptRow()
+     * encrypted and nothing else: decrypting a plain setting would turn it into an empty string,
+     * and a legacy plaintext credential has no ciphertext to re-encrypt. Deciding that here keeps
+     * the one definition of "sensitive" (schema first, name heuristic for unregistered rows) and of
+     * the encryptor envelope in this class.
+     *
+     * @param string $serviceCode
+     * @param array<array-key,mixed> $configuration Stored (still encrypted) configuration row
+     * @return list<string>
+     */
+    public function getEncryptedFieldNames(string $serviceCode, array $configuration): array
+    {
+        return array_map(
+            'strval',
+            array_keys(array_filter(
+                $configuration,
+                fn (mixed $value, int|string $key): bool => is_string($value)
+                    && $this->isEncrypted($value)
+                    && $this->isSensitive($serviceCode, (string)$key),
+                ARRAY_FILTER_USE_BOTH,
+            )),
+        );
+    }
+
+    /**
+     * Whether this save points a row at a different host than the one stored for it.
      *
      * The obscured placeholder exists so an administrator can save the form without ever seeing a
      * stored credential. An editable endpoint would hand it back to them: point the row at a host
@@ -183,26 +217,61 @@ class SensitiveDataProcessor
      * read the credential off your own server. Whoever moves the endpoint therefore has to supply
      * the credential for it, which is something only someone who already holds it can do.
      *
-     * A brand-new row has nothing stored to leak, so this only guards edits.
+     * An endpoint missing from the stored row counts as empty, so filling one in where none was
+     * stored is a move like any other: otherwise a stored row without that field (saved before the
+     * provider gained it, or edited by hand) would let the first host typed in receive the key.
+     * Empty on both sides is not a move. A brand-new row has no stored credential to leak, which
+     * restoreRow() handles by only refusing when there is one.
      *
+     * @param string $serviceCode
      * @param array<array-key,mixed> $configuration Submitted service configuration row
      * @param array<array-key,mixed> $previous Previously stored configuration row
      * @return bool
      */
-    private function isRedirected(array $configuration, array $previous): bool
+    private function isRedirected(string $serviceCode, array $configuration, array $previous): bool
     {
-        foreach (self::ENDPOINT_KEYS as $key) {
-            if (!array_key_exists($key, $previous)) {
-                continue;
-            }
-            $before = is_string($previous[$key]) ? trim($previous[$key]) : '';
-            $after = is_string($configuration[$key] ?? null) ? trim((string)$configuration[$key]) : '';
-            if (rtrim($before, '/') !== rtrim($after, '/')) {
-                return true;
-            }
-        }
+        return array_filter(
+            $this->getEndpointFieldNames($serviceCode),
+            fn (string $key): bool => $this->normalizeEndpoint($previous[$key] ?? null)
+                !== $this->normalizeEndpoint($configuration[$key] ?? null),
+        ) !== [];
+    }
 
-        return false;
+    /**
+     * The fields of a service that name the host its credentials are sent to.
+     *
+     * The fields the registered schema flags, plus FALLBACK_ENDPOINT_KEYS whether the provider is
+     * registered or not. A field named like an endpoint is never treated as anything else: guarding
+     * one that turns out not to be costs a retyped key, missing one costs the key itself.
+     *
+     * @param string $serviceCode
+     * @return list<string>
+     */
+    private function getEndpointFieldNames(string $serviceCode): array
+    {
+        $flaggedNames = array_map(
+            static fn (FieldDescriptorInterface $field): string => $field->getName(),
+            array_filter(
+                $this->getFieldSchema()[$serviceCode] ?? [],
+                static fn (FieldDescriptorInterface $field): bool => $field->isEndpoint(),
+            ),
+        );
+
+        return array_values(array_unique([...self::FALLBACK_ENDPOINT_KEYS, ...$flaggedNames]));
+    }
+
+    /**
+     * An endpoint value reduced to what decides the host, so cosmetic edits are not a move.
+     *
+     * Surrounding space and a trailing slash do not change where a request goes; anything that is
+     * not a string (absent, null, a hand-edited array) is treated as empty.
+     *
+     * @param mixed $value
+     * @return string
+     */
+    private function normalizeEndpoint(mixed $value): string
+    {
+        return is_string($value) ? rtrim(trim($value), '/') : '';
     }
 
     /**
@@ -236,9 +305,9 @@ class SensitiveDataProcessor
      */
     private function isSensitive(string $serviceCode, string $key): bool
     {
-        $schema = $this->getFieldSchema();
-        if (isset($schema[$serviceCode][$key])) {
-            return $schema[$serviceCode][$key];
+        $field = $this->getFieldSchema()[$serviceCode][$key] ?? null;
+        if ($field !== null) {
+            return $field->isEncrypted();
         }
 
         return $this->isNamedLikeACredential($key);
@@ -261,17 +330,21 @@ class SensitiveDataProcessor
     }
 
     /**
-     * Build (once) the encrypted-field schema from the registered services.
+     * Build (once) the field schema from the registered services.
      *
-     * @return array<string,array<string,bool>>
+     * Every registered code gets an entry, even one without fields, so getEndpointFieldNames() can
+     * tell a registered provider that declares no endpoint from one that is not registered at all.
+     *
+     * @return array<string,array<string,FieldDescriptorInterface>>
      */
     private function getFieldSchema(): array
     {
         if ($this->fieldSchema === null) {
             $this->fieldSchema = [];
             foreach ($this->serviceRegistry->getAll() as $code => $service) {
+                $this->fieldSchema[$code] = [];
                 foreach ($service->getConfigurationFields() as $field) {
-                    $this->fieldSchema[$code][$field->getName()] = $field->isEncrypted();
+                    $this->fieldSchema[$code][$field->getName()] = $field;
                 }
             }
         }
@@ -282,10 +355,15 @@ class SensitiveDataProcessor
     /**
      * Whether a value already carries the encryptor envelope.
      *
+     * Public so ServiceImporter can tell a ciphertext another module stored from a plaintext key
+     * with the same definition this class encrypts and decrypts by. That matters more than it
+     * looks: Magento's encryptor does not refuse a plaintext, it decrypts one as a legacy
+     * Blowfish value and hands back garbage.
+     *
      * @param string $value
      * @return bool
      */
-    private function isEncrypted(string $value): bool
+    public function isEncrypted(string $value): bool
     {
         return (bool)preg_match(self::ENCRYPTED_ENVELOPE_PATTERN, $value);
     }

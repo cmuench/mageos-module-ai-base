@@ -15,7 +15,9 @@ use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\Api\SearchResultsInterfaceFactory;
 
 /**
- * Implementation of {@see UsageRecordRepositoryInterface}.
+ * Implementation of {@see UsageRecordRepositoryInterface} and of the internal
+ * {@see UsageRecordReportInterface}: one class over one table, split into two contracts only so
+ * the range aggregation stays out of the public API.
  *
  * Every method here does one of three things: maps a {@see UsageRecordInterface} onto a row for
  * {@see save()}, assembles a collection for {@see getList()} the way any Magento repository does,
@@ -24,7 +26,7 @@ use Magento\Framework\Api\SearchResultsInterfaceFactory;
  * class testable against a small fake of {@see UsageLogResourceInterface} instead of against a
  * real database connection.
  */
-class UsageRecordRepository implements UsageRecordRepositoryInterface
+class UsageRecordRepository implements UsageRecordRepositoryInterface, UsageRecordReportInterface
 {
     /**
      * Rows {@see deleteOlderThan()} asks {@see UsageLogResourceInterface::deleteBatch()} to remove

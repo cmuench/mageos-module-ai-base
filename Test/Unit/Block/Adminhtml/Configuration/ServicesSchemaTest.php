@@ -163,14 +163,13 @@ final class ServicesSchemaTest extends TestCase
      * `Magento\Backend\Block\Template::__construct()` resolves its `jsonHelper` through
      * `ObjectManager::getInstance()`, two levels above this class, so no constructor
      * argument can avoid it and the real ObjectManager is not available in a unit test.
-     * `getServicesSchemaJson()` depends only on the three properties set here.
+     * `getServicesSchemaJson()` depends only on the two properties set here.
      */
     private function blockWith(AiServiceConfigurationInterface $service): Services
     {
         $reflection = new \ReflectionClass(Services::class);
         $block = $reflection->newInstanceWithoutConstructor();
 
-        $reflection->getProperty('jsonSerializer')->setValue($block, new Json());
         $reflection->getProperty('serviceRegistry')->setValue($block, new ServiceRegistry([$service]));
         $reflection->getProperty('modelListResolver')->setValue($block, $this->modelListResolver);
 

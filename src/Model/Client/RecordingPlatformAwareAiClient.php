@@ -4,11 +4,12 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Model\Client;
 
-use Magento\Store\Model\StoreManagerInterface;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Api\PlatformAwareInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
+use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use Psr\Log\LoggerInterface;
+use Symfony\AI\Platform\PlatformInterface;
 
 /**
  * {@see RecordingAiClient} for a wrapped client that also implements {@see PlatformAwareInterface}.
@@ -31,7 +32,7 @@ class RecordingPlatformAwareAiClient extends RecordingAiClient implements Platfo
      * @param AiClientInterface&PlatformAwareInterface $platformAwareDelegate The client every call,
      *        including getPlatform() and normalizeOptions(), is actually made through
      * @param UsageRecordRepositoryInterface $repository
-     * @param StoreManagerInterface $storeManager
+     * @param UsageStoreResolver $storeResolver
      * @param LoggerInterface $logger
      */
     // Not a useless override: the promoted parameter is typed as the narrower intersection
@@ -41,16 +42,16 @@ class RecordingPlatformAwareAiClient extends RecordingAiClient implements Platfo
     public function __construct(
         private readonly AiClientInterface&PlatformAwareInterface $platformAwareDelegate,
         UsageRecordRepositoryInterface $repository,
-        StoreManagerInterface $storeManager,
+        UsageStoreResolver $storeResolver,
         LoggerInterface $logger,
     ) {
-        parent::__construct($platformAwareDelegate, $repository, $storeManager, $logger);
+        parent::__construct($platformAwareDelegate, $repository, $storeResolver, $logger);
     }
 
     /**
      * @inheritdoc
      */
-    public function getPlatform(): object
+    public function getPlatform(): PlatformInterface
     {
         return $this->platformAwareDelegate->getPlatform();
     }

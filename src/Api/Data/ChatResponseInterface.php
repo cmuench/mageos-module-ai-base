@@ -6,6 +6,11 @@ namespace MageOS\AiBase\Api\Data;
 
 /**
  * What the model returned for one exchange.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface ChatResponseInterface
 {

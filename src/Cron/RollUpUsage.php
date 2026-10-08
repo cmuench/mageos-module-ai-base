@@ -35,6 +35,10 @@ class RollUpUsage
      * recording path there is no live admin request behind this call to protect, so Magento should
      * mark the scheduled run errored.
      *
+     * A run skipped because another one held the roll-up lock logs no summary:
+     * {@see UsageMaintenance} already logged why it skipped, and an all-zero summary next to it
+     * would read as "ran and found nothing", which is not what happened.
+     *
      * @return void
      */
     public function execute(): void
@@ -47,6 +51,10 @@ class RollUpUsage
                 ['exception' => $e],
             );
             throw $e;
+        }
+
+        if ($result->isSkipped()) {
+            return;
         }
 
         $this->logger->info(sprintf(

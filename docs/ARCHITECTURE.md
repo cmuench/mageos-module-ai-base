@@ -11,11 +11,14 @@ shaped the way they are. For task-oriented guides see
 ```
 Api/
   AiServiceSelectorInterface        read configured services (consumer API)
+  ServiceImporterInterface          add a configured service from another module's data patch
   AiClientInterface                 provider-agnostic AI client: chat, streamChat, complete
   AiClientFactoryInterface          builds clients from saved config (consumer API)
   ChatRequestBuilderInterface       assembles a request without naming a Model class
   PlatformAwareInterface            opt-in escape hatch to the raw symfony/ai Platform
   ModelListProviderInterface        opt-in live model listing (provider SPI)
+  PlatformArgumentsProviderInterface  opt-in bridge factory arguments when not the API key alone (provider SPI)
+  JsonFetcherInterface              GET + JSON decode for model listings, host-only error messages
   UsageStatsInterface               the one read contract behind the dashboard and the CLI report
   UsageRecordRepositoryInterface    persistence for the raw mageos_ai_usage_log table
   UsageDailyRepositoryInterface     persistence for the mageos_ai_usage_daily roll-up table
@@ -38,8 +41,10 @@ Api/
     Granularity                     Day | Month, how getTimeSeries() buckets a period
 
 AiServices/                         bundled providers (OpenAi, Anthropic, Azure, ...)
-  FieldFactoryTrait                 shared field builders (api_key, model, base_url, ...)
-  ModelListTrait                    shared OpenAI-shape model list parsing / base-URL resolution
+  AbstractAiService                 base class every provider extends: field builders, defaults
+                                    for interface methods added in minor releases, API-key-first
+                                    platform arguments
+  ModelListTrait                    shared OpenAI-shape model list parsing (internal)
 
 Model/
   AiServiceSelector                 parses stored JSON -> AiServiceInterface[] (decrypts, memoized)
@@ -47,6 +52,9 @@ Model/
   FieldDescriptor, AiService        value objects behind the Data interfaces
   Config/
     SensitiveDataProcessor          encrypt/decrypt/mask/restore per service schema
+    CredentialReEncryptor           re-encrypts stored credentials at every scope after a key change
+    ServiceImporter                 adds a default-scope row from code (ServiceImporterInterface)
+    StoredServicesStorage           raw read/conditional write of every scope's stored value (internal)
     Backend/EncryptedServices       config backend model (save/load hooks)
     Source/ConfiguredService        option source for consumer modules' own system.xml fields
     Source/ConfiguredServiceWithAutomatic  the same, plus an empty-valued "Automatic" option
@@ -60,13 +68,16 @@ Model/
     RecordingAiClient               decorator that writes one usage row per completed call
     RecordingPlatformAwareAiClient  the same decorator, for a delegate that is also PlatformAwareInterface
   ModelList/
-    HttpFetcher                     shared HTTP/JSON plumbing for model fetching
+    HttpFetcher                     Api\JsonFetcherInterface: shared HTTP/JSON plumbing for model fetching
     Storage                         persists fetched lists per service code
     Resolver                        stored list ?? curated getSupportedModels()
   Usage/
     UsageConfig                     typed reader for the mageos_ai/usage/* config group
     UsageRecord                     value object behind UsageRecordInterface
     UsageRecordRepository, UsageDailyRepository   implementations of the two Api repositories
+    UsageRecordReportInterface, UsageDailyReportInterface   internal range aggregation (raw row
+                                      arrays) for UsageStats and UsageMaintenance; not public API,
+                                      may change in any release
     UsageStats                      implementation of UsageStatsInterface; merges raw + daily
     UsageMaintenance                the roll-up/prune sequence the cron job runs
     UsageMaintenanceResult          what one UsageMaintenance::run() did, for the cron's log line
@@ -85,6 +96,8 @@ Controller/Adminhtml/
   Service/Test                       Test Connection endpoint (JSON)
   Service/RefreshModels              manual model list refresh endpoint (JSON)
   Usage/Index                        the Reports > AI Token Usage admin page
+Plugin/EncryptionKey/
+  ReEncryptWithCoreConfigData        after the core_config_data re-encryptor (encryption:data:re-encrypt)
 Cron/
   RollUpUsage                        scheduled entry point for UsageMaintenance
 Console/Command/
@@ -101,8 +114,11 @@ Console/Command/
    - `restoreRow()` — any submitted `******` placeholder is replaced by the previously
      stored (still encrypted) value for that row/service/field, so saving without retyping
      keeps credentials. Row identity relies on the form reusing stored row IDs. Restore is
-     refused (`isRedirected()`) if `base_url`/`endpoint` changed in the same save, so a
-     redirected endpoint can never read back a credential it was never issued.
+     refused (`isRedirected()`) if any endpoint field changed in the same save, so a
+     redirected endpoint can never read back a credential it was never issued. Endpoint fields
+     are the ones whose descriptor says `isEndpoint()` (`baseUrlField()` and Azure's `endpoint`),
+     plus any field named `base_url` or `endpoint`, for registered and unregistered providers
+     alike, so a provider that predates the flag keeps the guard it had. An endpoint absent from the stored row counts as empty, so adding one is a change.
    - `encryptRow()` — descriptor-flagged fields are encrypted with Magento's
      `EncryptorInterface`. Encryption is idempotent: values already carrying the encryptor
      envelope (`N:N:...`) are left alone.
@@ -110,7 +126,8 @@ Console/Command/
 
 ### Read path (database → consumers)
 
-`AiServiceSelector::getAll()/getByCode()/getById()` reads the path with store scope,
+`AiServiceSelector::getAll()/getByCode()/getById()` reads the path with store scope (or, inside
+`Model\ServiceScope::run()`, at the scope an admin action established; see below),
 defensively parses (non-string raw, malformed JSON, malformed rows, non-string codes are all
 skipped, never thrown), decrypts flagged fields via `SensitiveDataProcessor`, and wraps each
 row in an `AiServiceInterface`. Consumers always receive plaintext values.
@@ -124,6 +141,20 @@ with different credentials or models. A row deleted in the admin makes stored id
 design: the selector answers `null` and the client factory throws, rather than resolving to a
 different row and billing an account nobody chose.
 
+### Import path (another module's data patch → database)
+
+`Model\Config\ServiceImporter` (`Api\ServiceImporterInterface`) adds a row without the config
+model: a data patch has no admin session, and the backend model's save hooks exist for the
+form's masked placeholders. It keeps one definition of a stored row anyway: fields are checked
+against the provider's descriptors, encrypted by `SensitiveDataProcessor::encryptRow()`, and the
+default-scope value is written through `StoredServicesStorageInterface`, conditional on what was
+read (`replace()`, or `addDefault()` when nothing is stored yet), like the re-encryptor. The row
+id has the form's `_<epoch ms>_<ms part>` shape. A row of the same service already holding every
+imported value is returned instead of added. Afterwards it calls
+`ReinitableConfigInterface::reinit()` rather than only cleaning the config cache, because the
+config keeps the default scope in memory once loaded and a read later in the same process would
+otherwise not see the row.
+
 ### Admin display path
 
 `EncryptedServices::_afterLoad()` masks flagged fields with `******` — plaintext
@@ -134,9 +165,9 @@ encrypted fields regardless of their declared type.
 
 `ClientFactory::create(?code)` → first matching configured service → resolves the bridge
 FQCN from `BridgeRegistry` → `class_exists`/`method_exists('createPlatform')` guards → builds a
-`SymfonyAiClient` carrying the platform, the model, the service code and the row id. All
-symfony/ai references are lazy (string FQCNs); the module compiles and runs without the
-package installed.
+`SymfonyAiClient` carrying the platform, the model, the service code and the row id. Bridge
+classes are referenced as string FQCNs and resolved lazily, so a provider whose suggested bridge
+is not installed fails only when a client for it is created.
 
 Per call, `SymfonyAiClient` runs the caller's options through `OptionNormalizer` before handing
 them to the platform. Bridges merge options into the provider's request body nearly untouched
@@ -176,14 +207,26 @@ provider's wording. `streamChat()` yields chunks and then *returns* the assemble
 `ChatResponseInterface`, because the platform lifts final token counts and the stop reason out of
 the delta sequence into result metadata — a client only watching deltas would report neither.
 
+### Admin actions and the edited scope
+
+The config page addresses its scope as `website/<id>` or `store/<id>`. The form sends those
+parameters with Test Connection and Refresh Models, `Model\Config\ConfigScopeResolver` turns them
+into a `ConfigScope`, and the controller resolves the row inside `Model\ServiceScope::run()`, which
+makes `AiServiceSelector` read that scope instead of the ambient one. The `ConfiguredService`
+option source does the same with the config page's own request. An emulation rather than a scope
+argument, because `AiServiceSelectorInterface` is `@api` and Test Connection should keep building
+its client through `AiClientFactoryInterface`; Magento's store emulation cannot express a website.
+
 ### Model refresh path (manual only)
 
 Admin clicks Refresh Models → `RefreshModels` controller → the service's `fetchModels()`
-(via `HttpFetcher`, Magento's HTTP client) → `Storage::save()` at
-`mageos_ai/services/models/<code>` (which also cleans the config cache so the change is
-live immediately) → response updates the form select in place.
-`Resolver` is the single merge point: stored list if present, else the curated
-`getSupportedModels()`. There is intentionally no cron/automatic fetching: no background
+(via `HttpFetcher`, Magento's HTTP client) → `Storage::saveForRow()` at
+`mageos_ai/services/row_models/<row id>`, at the edited scope (which also cleans the config cache
+so the change is live immediately) → response updates that row's model field in place.
+Lists are per row because they belong to the endpoint a row points at: two Ollama rows on
+different hosts serve different models. `Resolver` is the single merge point: the row's stored
+list if present, else a list stored per code by versions before this (`mageos_ai/services/models/<code>`,
+read only), else the curated `getSupportedModels()`. There is intentionally no cron/automatic fetching: no background
 HTTP with credentials, no cache-invalidation policy, and the admin sees exactly when and
 why a list changed.
 
@@ -203,8 +246,13 @@ override, or the client's configured one) and the consumer to attribute (the cal
 forwarding the call — a third-party delegate has never heard of it and would otherwise forward it
 straight into the provider's request body, which OpenAI-compatible endpoints reject with a 400 —
 then writes one `UsageRecordRepositoryInterface::save()` call with the resolved model, resolved
-consumer, the current store id (`0` when no store is in scope, which is what cron, CLI and
-adminhtml already mean by that column elsewhere), and whatever the call produced. **A row is
+consumer, the store id `Model\Usage\UsageStoreResolver` attributes the call to, and whatever the
+call produced. In a storefront area (`frontend`, `webapi_rest`, `webapi_soap`, `graphql`) that is
+the current store. Anywhere else (admin, cron, CLI, no area) it is `0`, unless the current store
+differs from the default store view, which means the code emulated a specific store on purpose; the
+store resolver reports the default store view in cron and CLI even when nothing chose it, which is
+why that one cannot be taken at face value. Emulating the default store view itself is therefore
+recorded as `0`. **A row is
 written whether the call succeeded, failed after reaching the provider, or succeeded while
 reporting no usage at all**: a successful response's `TokenUsageInterface` (`null` when the
 provider reported nothing), or `null` usage with the `failed` flag set when the delegate threw.
@@ -244,17 +292,23 @@ behind a chat call).
 
 1. **Roll up, then delete, one whole local day at a time**, oldest first, for every day strictly
    older than `retention_days` and at or after the oldest row still in `mageos_ai_usage_log`.
-   Each day's window is resolved once in the store timezone
-   (`TimezoneInterface::getConfigTimezone()` plus plain `\DateTimeImmutable`/`\DateTimeZone`
+   Each day's window is resolved once in the reporting timezone, Default Config's, read through
+   `Model\Usage\ReportingTimezone` with the scope pinned explicitly so cron (whose ambient store is
+   the default store view) and the admin dashboard agree on it
+   (`TimezoneInterface::getConfigTimezone('default')` plus plain `\DateTimeImmutable`/`\DateTimeZone`
    arithmetic — never SQL's `DATE()` or `CONVERT_TZ()`, so a MySQL instance with no timezone
    tables loaded still gets the right boundary and a daylight-saving transition still produces
    exactly one 23- or 25-hour bucket) and converted to a UTC `[start, end)` pair.
-   `UsageRecordRepositoryInterface::aggregateRange()` produces one row per
+   `UsageRecordReportInterface::aggregateRange()` produces one row per
    (`service_id`, `service_code`, `model`, `consumer`, `store_id`) grouping key for that day, which
-   `UsageDailyRepositoryInterface::saveAggregates()` writes with an insert-or-update that
-   *replaces* an existing row's counts rather than summing onto them — the whole day is always
-   recomputed from the raw rows still present, so summing would double-count a day rolled up twice
-   after a partial failure. Only once that write has succeeded does
+   `UsageDailyRepositoryInterface::saveAggregates()` writes with an insert-or-update that *adds* to
+   an existing row's counts (a nullable token count stays null only when neither side has one).
+   Replacing would be wrong: the raw rows behind a stored total are already deleted, so a later
+   run that finds new raw rows for that day (a late row, a reporting timezone change) only sees
+   part of it and would overwrite the full total with the partial one. Adding requires each raw row
+   to be added exactly once, which the per-day transaction and a `LockManagerInterface` lock named
+   `mageos_ai_usage_rollup`, held for the whole run, guarantee; a run that cannot take the lock is
+   skipped and logged at notice level. Only once that write has succeeded does
    `UsageRecordRepositoryInterface::deleteOlderThan()` remove that day's raw rows, in bounded
    batches (a store with months of history should not hold a lock for minutes deleting it in one
    statement). Roll-up before delete is the one ordering rule this class exists to enforce: reversed,
@@ -272,9 +326,10 @@ not retention of what was already recorded.
 | Path | Content |
 |---|---|
 | `mageos_ai/services/configuration` | JSON `{rowId: {serviceCode: {field: value}}}`; flagged fields encrypted |
-| `mageos_ai/services/models/<code>` | JSON `{models: {value: label}, fetched_at: <ts>}` from the last manual refresh |
+| `mageos_ai/services/row_models/<row id>` | JSON `{models: {value: label}, fetched_at: <ts>}` from the last manual refresh of that row, at the scope it was refreshed in (row ids that are not a safe path segment are sha1-hashed) |
+| `mageos_ai/services/models/<code>` | Same payload, per provider code, written by versions before lists became per row; read as a fallback only |
 | `mageos_ai_usage_log` table | One row per call the client actually sent: succeeded, failed after reaching the provider, or succeeded reporting no usage. Never for a call `AiRequestNotSentException` rejected before it reached the provider. Columns: service id/code, model, consumer, store id, six independently-nullable token counts (prompt, completion, total, cache read, cache write, reasoning), whether it streamed, whether it failed, `created_at`. Counts and metadata only, see the decision record below |
-| `mageos_ai_usage_daily` table | One row per (`usage_date`, service id, model, consumer, store id) grouping key per day, written by the roll-up cron; `usage_date` is a store-timezone calendar date, not `DATE(created_at)`. Carries the same six token counts plus `calls` and `failed_calls` |
+| `mageos_ai_usage_daily` table | One row per (`usage_date`, service id, model, consumer, store id) grouping key per day, written by the roll-up cron; `usage_date` is a calendar date in the reporting timezone (Default Config's), not `DATE(created_at)`. Carries the same six token counts plus `calls` and `failed_calls` |
 
 Row IDs are opaque strings generated by the form (`_<time>_<ms>`) and preserved across
 saves so credential restore can match rows.
@@ -287,13 +342,33 @@ saves so credential restore can match rows.
   only to rows whose provider class is no longer registered (defense in depth for removed
   third-party modules).
 - **No plaintext in the admin**: masked on load, restored on save (see flows above).
-  Restore also refuses to carry a masked credential across an edited `base_url`/
-  `endpoint` in the same save, since that would let a redirected endpoint read back a
-  credential it was never issued.
+  Restore also refuses to carry a masked credential across an edited endpoint field in the
+  same save, since that would let a redirected endpoint read back a credential it was never
+  issued. Which fields are endpoints is schema-driven (`FieldDescriptorInterface::isEndpoint()`),
+  so a third-party host field called `host` or `api_base` is guarded too; `base_url`/`endpoint`
+  are guarded by name on every row, so a provider that predates the flag is not left open.
+- **Encryption key rotation**: Magento re-encrypts only config values that are a ciphertext as a
+  whole, so the credentials inside the services JSON would stay under the old key and decrypt to
+  an empty string once it is removed from `crypt/key`. `Plugin\EncryptionKey\ReEncryptWithCoreConfigData`
+  hooks the one place Magento re-encrypts after a key change on every supported version: the
+  `core_config_data` handler of `bin/magento encryption:data:re-encrypt` (`encryption:key:change`
+  itself only writes the new key, and the admin "Manage Encryption Key" page no longer exists from
+  2.4.8 on). It runs `Model\Config\CredentialReEncryptor`,
+  which reads the raw value of every scope from `core_config_data`, re-encrypts only the fields
+  `SensitiveDataProcessor` reports as encrypted, and writes each copy back only if it still holds
+  what was read. A value that does not decrypt (or whose new ciphertext does not decrypt back) is
+  left as stored and logged with its location, never blanked. Magento_EncryptionKey is not a
+  dependency: a plugin on a class that is missing or belongs to a disabled module never runs, and
+  the plugin class implements none of its interfaces, so `setup:di:compile` works without it.
+  Limit, the same as core's: a value pinned in `app/etc/env.php` or `config.php` is not
+  re-encrypted.
 - **Legacy tolerance**: values without the encryptor envelope are treated as plaintext and
   pass through reads unchanged; they get encrypted on the next admin save.
 - **CSP**: all form JavaScript is emitted through `SecureHtmlRenderer` (hash/nonce), safe
-  under strict admin CSP (Magento 2.4.7+).
+  under strict admin CSP.
+- **No redirects**: `ClientFactory` hands every bridge an HTTP client with `max_redirects` set to
+  0. Symfony strips `Authorization` on a cross-host redirect but not a provider's own header such
+  as Azure's `api-key`, and a provider API never legitimately redirects a request.
 - **Endpoints**: `Service\Test` and `Service\RefreshModels` are POST-only, form-key validated
   (enforced by the `Backend\App\AbstractAction` plugin chain — which is why they extend
   `Backend\App\Action` rather than using pure composition), and gated by the
@@ -308,8 +383,8 @@ saves so credential restore can match rows.
 ## Decision record: symfony/ai dependencies
 
 The client layer adapts [symfony/ai-platform](https://github.com/symfony/ai) rather than
-hand-rolling per-provider HTTP clients. The **OpenAI and Anthropic bridges are hard
-requirements** (pinned `^0.14`); every other bridge stays under `suggest`.
+hand-rolling per-provider HTTP clients. **symfony/ai-platform and the OpenAI and Anthropic
+bridges are hard requirements** (pinned `^0.14`); every other bridge stays under `suggest`.
 
 Originally every symfony/ai package was a soft dependency, for three reasons: installability
 (symfony/ai-platform needs Symfony 7.3+ components, which older Magento releases cannot
@@ -319,9 +394,13 @@ second, manual `composer require` before anything works is a worse default than 
 narrows its installable range. Requiring the two bridges means a fresh install can talk to
 OpenAI and Anthropic immediately, at the accepted cost that config-registry-only consumers
 carry the SDK and that the module only installs where the dependency graph allows Symfony
-7.3+ components. The `magento/framework` constraint is narrowed to `^103.0.7 || ^104.0`
-(Magento 2.4.7+) to state that floor honestly: 2.4.6's Symfony 5.4 line cannot resolve next
-to symfony/ai-platform, while 2.4.7 and 2.4.8 can.
+7.3+ components. The `magento/framework` constraint is narrowed to `^103.0.8 || ^104.0`
+(Magento 2.4.8+, Mage-OS 1.1+) to state that floor honestly. 2.4.6's Symfony 5.4 line cannot
+resolve next to symfony/ai-platform. 2.4.7's own packages can, but every 2.4.7 project template
+(up to 2.4.7-p10) requires MFTF ^4.7 in require-dev, which needs symfony/event-dispatcher ^6.4,
+and pins allure-phpunit ^2, which rules out the MFTF releases that would move on. A standard
+2.4.7 project therefore cannot install this module. CI tests the floor: Magento 2.4.8 on PHP
+8.2 (check-extension) and on PHP 8.3 (E2E).
 
 **Churn isolation still stands unchanged.** The component is experimental with no BC promise.
 Its README says so outright: *"This Component is experimental. Experimental features are not

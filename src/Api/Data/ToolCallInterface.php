@@ -10,8 +10,16 @@ namespace MageOS\AiBase\Api\Data;
  * This module never executes tools: it reports what was requested and carries the consumer's
  * result back. Deciding whether a call is allowed to run, and running it, stays with the module
  * that owns the tool.
+ *
+ * Serializes to `{"id": string, "name": string, "arguments": object}`; the JSON keys are part of
+ * this interface's contract, so a frontend reading them keeps working across 1.x.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
-interface ToolCallInterface
+interface ToolCallInterface extends \JsonSerializable
 {
     /**
      * Provider-assigned id, used to pair this call with its result.

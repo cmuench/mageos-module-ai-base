@@ -10,13 +10,14 @@ use MageOS\AiBase\Api\Data\StreamChunkType;
 use MageOS\AiBase\Model\Chat\ChatMessage;
 use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiServiceException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
 use MageOS\AiBase\Model\Client\OptionNormalizer;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
 use Symfony\AI\Platform\Model;
 use Symfony\AI\Platform\Result\DeferredResult;
 use Symfony\AI\Platform\Result\InMemoryRawResult;
@@ -24,7 +25,6 @@ use Symfony\AI\Platform\Result\RawResultInterface;
 use Symfony\AI\Platform\Result\ResultInterface;
 use Symfony\AI\Platform\Result\Stream\Delta\TextDelta;
 use Symfony\AI\Platform\Result\StreamResult;
-use Symfony\AI\Platform\Result\TextResult;
 use Symfony\AI\Platform\ResultConverterInterface;
 use Symfony\AI\Platform\TokenUsage\TokenUsage;
 use Symfony\AI\Platform\TokenUsage\TokenUsageExtractorInterface;
@@ -39,13 +39,6 @@ use Symfony\AI\Platform\TokenUsage\TokenUsageExtractorInterface;
  */
 final class SymfonyAiClientStreamFailureTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TextResult::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_it_yields_the_usage_seen_before_a_stream_failure(): void
     {
         $platform = new FakeStreamingPlatform(static function (): \Generator {
@@ -212,6 +205,7 @@ final class SymfonyAiClientStreamFailureTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
     }
 

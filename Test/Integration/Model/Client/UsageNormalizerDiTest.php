@@ -27,13 +27,6 @@ use Symfony\AI\Platform\TokenUsage\TokenUsage;
  */
 final class UsageNormalizerDiTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TextResult::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_it_injects_the_usage_normalizer_through_di(): void
     {
         $metadata = new Metadata();

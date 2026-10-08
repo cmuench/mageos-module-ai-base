@@ -5,14 +5,20 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Client;
 
 use Magento\Framework\Exception\LocalizedException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiContentFilteredException;
+use MageOS\AiBase\Exceptions\AiInvalidRequestException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiServiceException;
+use MageOS\AiBase\Exceptions\AiToolCallException;
+use MageOS\AiBase\Exceptions\AiTransientException;
 
 /**
  * Translates a symfony/ai-platform failure into this module's own typed exception hierarchy.
  *
  * Matched by class name rather than by catching each symfony/ai type directly, and every match is
- * guarded with `class_exists` first: the platform classes are referenced only as string FQCNs here
- * for the same reason {@see SymfonyAiClient} does throughout, so a consumer's static analysis never
- * gains a hard dependency on symfony/ai-platform through this class either. An exception this
+ * guarded with `class_exists` first, so an exception class a later symfony/ai release renames or
+ * drops simply stops matching instead of needing a change here before the upgrade. An exception this
  * module does not recognize, symfony/ai's own or not, still comes back as {@see AiServiceException}
  * rather than escaping unmapped: every failure this module can produce stays a
  * {@see LocalizedException}, matching what `AiClientInterface` documents.

@@ -4,21 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
-use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
-
-class Deepseek implements AiServiceConfigurationInterface
+class Deepseek extends AbstractAiService
 {
-    use FieldFactoryTrait;
-
-    /**
-     * @param FieldDescriptorInterfaceFactory $fieldFactory
-     */
-    public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-    ) {
-    }
-
     /**
      * @inheritdoc
      */
@@ -36,13 +23,15 @@ class Deepseek implements AiServiceConfigurationInterface
     }
 
     /**
-     * @inheritdoc
+     * DeepSeek's two API aliases, labelled without a version: each alias moves to the newest model.
+     *
+     * @return array<string, string>
      */
     public function getSupportedModels(): array
     {
         return [
-            'deepseek-chat'     => 'DeepSeek V3',
-            'deepseek-reasoner' => 'DeepSeek R1',
+            'deepseek-chat'     => 'DeepSeek Chat',
+            'deepseek-reasoner' => 'DeepSeek Reasoner',
         ];
     }
 
@@ -52,8 +41,8 @@ class Deepseek implements AiServiceConfigurationInterface
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
+            $this->apiKeyField(),
+            $this->modelField($this->getSupportedModels()),
         ];
     }
 }

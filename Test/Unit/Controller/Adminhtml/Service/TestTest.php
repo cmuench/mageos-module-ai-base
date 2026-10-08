@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Test\Unit\Controller\Adminhtml\Service;
 
 require_once __DIR__ . '/../../../Stubs/RecordingLogger.php';
+require_once __DIR__ . '/../../../Stubs/FixedConfigScopeResolver.php';
 
 use Magento\Backend\App\Action\Context;
 use Magento\Framework\App\RequestInterface;
@@ -14,8 +15,12 @@ use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\Api\AiClientFactoryInterface;
 use MageOS\AiBase\Api\AiClientInterface;
 use MageOS\AiBase\Controller\Adminhtml\Service\Test;
-use MageOS\AiBase\Model\Client\AiAuthenticationException;
+use MageOS\AiBase\Exceptions\AiAuthenticationException;
+use MageOS\AiBase\Model\Config\ConfigScope;
+use MageOS\AiBase\Model\Config\ConfigScopeResolver;
 use MageOS\AiBase\Model\FailureReporter;
+use MageOS\AiBase\Model\ServiceScope;
+use MageOS\AiBase\Test\Unit\Stubs\FixedConfigScopeResolver;
 use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
@@ -33,6 +38,7 @@ final class TestTest extends TestCase
     private JsonFactory&MockObject $jsonFactory;
     private AiClientFactoryInterface&MockObject $clientFactory;
     private RecordingLogger $logger;
+    private ServiceScope $serviceScope;
     private Test $subject;
 
     /**
@@ -61,12 +67,48 @@ final class TestTest extends TestCase
         $this->clientFactory = $this->createMock(AiClientFactoryInterface::class);
 
         $this->logger = new RecordingLogger();
-        $this->subject = new Test(
+        $this->serviceScope = new ServiceScope();
+        $this->subject = $this->subjectAt(FixedConfigScopeResolver::atDefault(), $context);
+    }
+
+    private function subjectAt(ConfigScopeResolver $scopeResolver, Context $context): Test
+    {
+        return new Test(
             $context,
             $this->jsonFactory,
             $this->clientFactory,
             new FailureReporter($this->logger),
+            $scopeResolver,
+            $this->serviceScope,
         );
+    }
+
+    /**
+     * The button on a website's config page tests that website's row: the client is built while the
+     * scope the page sent along is established, and the scope is released again afterwards.
+     */
+    public function test_execute_builds_the_client_at_the_scope_of_the_config_page(): void
+    {
+        $this->stubParams(['service_id' => '_website_row', 'service_code' => 'openai']);
+        $context = $this->createMock(Context::class);
+        $context->method('getRequest')->willReturn($this->request);
+        $scopeWhileBuilding = null;
+        $client = $this->createMock(AiClientInterface::class);
+        $client->method('complete')->willReturn('OK');
+        $this->clientFactory->method('createById')->willReturnCallback(
+            function () use (&$scopeWhileBuilding, $client) {
+                $scopeWhileBuilding = $this->serviceScope->getCurrent();
+
+                return $client;
+            }
+        );
+
+        $this->subjectAt(new FixedConfigScopeResolver(new ConfigScope('websites', 2, 'second')), $context)
+            ->execute();
+
+        self::assertTrue($this->resultData['success']);
+        self::assertSame('second', $scopeWhileBuilding?->getCode());
+        self::assertNull($this->serviceScope->getCurrent());
     }
 
     /**

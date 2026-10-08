@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
+require_once __DIR__ . '/../../Stubs/RecordingLogger.php';
+
 use Magento\Framework\Exception\LocalizedException;
 use MageOS\AiBase\Api\Data\FinishReason as AiBaseFinishReason;
 use MageOS\AiBase\Api\Data\MessageRole;
@@ -15,14 +17,17 @@ use MageOS\AiBase\Model\Chat\ChatRequest;
 use MageOS\AiBase\Model\Chat\ToolCall as AiBaseToolCall;
 use MageOS\AiBase\Model\Chat\ToolDefinition;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
-use MageOS\AiBase\Model\Client\AiRateLimitedException;
-use MageOS\AiBase\Model\Client\AiRequestNotSentException;
+use MageOS\AiBase\Exceptions\AiRateLimitedException;
+use MageOS\AiBase\Exceptions\AiRequestNotSentException;
 use MageOS\AiBase\Model\Client\BridgeRegistry;
 use MageOS\AiBase\Model\Client\OptionNormalizer;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use MageOS\AiBase\Test\Unit\Stubs\RecordingLogger;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Symfony\AI\Platform\FinishReason\FinishReason;
 use Symfony\AI\Platform\FinishReason\FinishReasonCase;
 use Symfony\AI\Platform\Message\Message;
@@ -50,18 +55,10 @@ use Symfony\AI\Platform\Tool\Tool;
 use Symfony\AI\Platform\TokenUsage\TokenUsage;
 
 /**
- * symfony/ai-platform is a soft dependency of this module, so these run only where it is
- * installed. Skipping beats failing: an install without the bridges is a supported setup.
+ * Runs against symfony/ai-platform's real message and result classes, which the module requires.
  */
 final class SymfonyAiClientChatTest extends TestCase
 {
-    protected function setUp(): void
-    {
-        if (!class_exists(TextResult::class)) {
-            self::markTestSkipped('symfony/ai-platform is not installed.');
-        }
-    }
-
     public function test_sends_the_configured_model_and_the_conversation(): void
     {
         $platform = new FakePlatform(new FakeResult(new TextResult('Hi there')));
@@ -257,6 +254,52 @@ final class SymfonyAiClientChatTest extends TestCase
         self::assertSame(['type' => 'object'], $tools[0]->getParameters());
     }
 
+    /**
+     * A tool without arguments holds `'properties' => []`, which json_encode writes as a JSON
+     * array; providers that validate the schema reject that, since `properties` must be an object.
+     */
+    public function test_sends_the_properties_of_a_tool_without_arguments_as_a_json_object(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+        $request = new ChatRequest(
+            [new ChatMessage(MessageRole::User, 'Hello')],
+            [new ToolDefinition('count_orders', 'Counts every order')],
+        );
+
+        $this->client($platform)->chat($request);
+
+        self::assertSame(
+            '{"type":"object","properties":{}}',
+            json_encode($platform->options['tools'][0]->getParameters())
+        );
+    }
+
+    /**
+     * Nested object schemas, directly or as array items, hit the same encoding problem.
+     */
+    public function test_sends_empty_nested_properties_as_json_objects_too(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+        $request = new ChatRequest(
+            [new ChatMessage(MessageRole::User, 'Hello')],
+            [new ToolDefinition('tag_orders', 'Tags orders', [
+                'type' => 'object',
+                'properties' => [
+                    'filter' => ['type' => 'object', 'properties' => []],
+                    'tags' => ['type' => 'array', 'items' => ['type' => 'object', 'properties' => []]],
+                ],
+            ])],
+        );
+
+        $this->client($platform)->chat($request);
+
+        self::assertSame(
+            '{"type":"object","properties":{"filter":{"type":"object","properties":{}},'
+            . '"tags":{"type":"array","items":{"type":"object","properties":{}}}}}',
+            json_encode($platform->options['tools'][0]->getParameters())
+        );
+    }
+
     public function test_sends_no_tools_key_when_none_were_offered(): void
     {
         $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
@@ -361,7 +404,7 @@ final class SymfonyAiClientChatTest extends TestCase
             new \Symfony\AI\Platform\Exception\AuthenticationException('Invalid API key'),
         );
 
-        $this->expectException(\MageOS\AiBase\Model\Client\AiAuthenticationException::class);
+        $this->expectException(\MageOS\AiBase\Exceptions\AiAuthenticationException::class);
 
         $this->client($platform)->chat($this->helloRequest());
     }
@@ -391,6 +434,29 @@ final class SymfonyAiClientChatTest extends TestCase
 
         self::assertSame('', $response->getText());
         self::assertSame(AiBaseFinishReason::Length, $response->getFinishReason());
+    }
+
+    /**
+     * Reading the reasoning off a truncated stream is allowed to fail without failing the answer,
+     * but not silently: the turn then replays without its signed reasoning (issue #63), and the
+     * log line is the only trace of why the provider rejects the next request.
+     */
+    public function test_a_truncated_stream_whose_reasoning_cannot_be_read_still_answers_and_logs_why(): void
+    {
+        $logger = new RecordingLogger();
+        $platform = new FakePlatform(new FakeResult(
+            deltas: [new TextDelta('Partial')],
+            resultFailure: new \RuntimeException('assistant message unavailable'),
+            streamFailure: new \Symfony\AI\Platform\Exception\MaxOutputTokensException('truncated'),
+        ));
+
+        $stream = $this->clientLoggingTo($platform, $logger)->streamChat($this->helloRequest());
+        iterator_to_array($stream, false);
+
+        self::assertSame('Partial', $stream->getReturn()->getText());
+        self::assertSame([], $stream->getReturn()->getReasoning());
+        self::assertSame('warning', $logger->getRecords()[0]['level']);
+        self::assertStringContainsString('assistant message unavailable', $logger->getMessages());
     }
 
     public function test_complete_returns_plain_text_for_a_single_prompt(): void
@@ -549,6 +615,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
 
         self::assertSame(UsageRecordInterface::CONSUMER_UNKNOWN, $client->getConsumer());
@@ -569,6 +636,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
             '   ',
         );
 
@@ -582,8 +650,18 @@ final class SymfonyAiClientChatTest extends TestCase
      */
     public function test_hands_out_the_platform_it_was_built_with(): void
     {
-        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
-        $client = $this->client($platform);
+        $platform = new InMemoryPlatform('Hi');
+        $client = new SymfonyAiClient(
+            $platform,
+            'gpt-4o',
+            'openai',
+            '_row_1',
+            $this->optionNormalizer(),
+            $this->usageNormalizer(),
+            new AiExceptionMapper(),
+            new BridgeRegistry([]),
+            new NullLogger(),
+        );
 
         self::assertInstanceOf(PlatformAwareInterface::class, $client);
         self::assertSame($platform, $client->getPlatform());
@@ -606,6 +684,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            new NullLogger(),
         );
 
         self::assertInstanceOf(PlatformInterface::class, $client->getPlatform());
@@ -813,6 +892,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['openai' => ['dialect' => 'openai_responses']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest());
@@ -832,6 +912,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['anthropic' => ['dialect' => 'anthropic_messages']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest());
@@ -856,6 +937,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry(['openai' => ['dialect' => 'openai_responses']]),
+            new NullLogger(),
         );
 
         $client->chat($this->helloRequest(), ['include' => ['file_search_call.results']]);
@@ -1032,6 +1114,14 @@ final class SymfonyAiClientChatTest extends TestCase
 
     private function client(FakePlatform $platform, string $serviceCode = 'openai'): SymfonyAiClient
     {
+        return $this->clientLoggingTo($platform, new NullLogger(), $serviceCode);
+    }
+
+    private function clientLoggingTo(
+        FakePlatform $platform,
+        LoggerInterface $logger,
+        string $serviceCode = 'openai',
+    ): SymfonyAiClient {
         return new SymfonyAiClient(
             $platform,
             'gpt-4o',
@@ -1041,6 +1131,7 @@ final class SymfonyAiClientChatTest extends TestCase
             $this->usageNormalizer(),
             new AiExceptionMapper(),
             new BridgeRegistry([]),
+            $logger,
         );
     }
 
@@ -1048,6 +1139,21 @@ final class SymfonyAiClientChatTest extends TestCase
      * A normalizer wired the way di.xml wires it, so cache-outside-prompt behavior matches
      * production for any test that builds a client through {@see client()} directly.
      */
+    private function azureClient(FakePlatform $platform): SymfonyAiClient
+    {
+        return new SymfonyAiClient(
+            $platform,
+            'gpt-4o',
+            'azure',
+            '_row_1',
+            $this->optionNormalizer(),
+            $this->usageNormalizer(),
+            new AiExceptionMapper(),
+            new BridgeRegistry(['azure' => ['model_override' => false]]),
+            new NullLogger(),
+        );
+    }
+
     private function usageNormalizer(): UsageNormalizer
     {
         return new UsageNormalizer(new BridgeRegistry(['anthropic' => ['cache_outside_prompt' => true]]));
@@ -1190,6 +1296,65 @@ final class SymfonyAiClientChatTest extends TestCase
     }
 
     /**
+     * The router refuses a model outside the bridge's catalogue before any request goes out, so
+     * the consumer and the usage log must not see it as a provider failure that was billed.
+     */
+    public function test_it_throws_request_not_sent_for_a_model_the_platform_cannot_route(): void
+    {
+        $platform = new FakePlatform(
+            null,
+            new \Symfony\AI\Platform\Exception\ModelNotFoundException('No provider found for model "gpt-9".')
+        );
+
+        $this->expectException(AiRequestNotSentException::class);
+        $this->expectExceptionMessage('cannot send a request to model "gpt-9"');
+
+        $this->client($platform)->chat($this->helloRequest(), ['model' => 'gpt-9']);
+    }
+
+    /**
+     * Azure's platform always sends its configured deployment as the model, so an override would
+     * be ignored while the usage log booked it to a model that never ran.
+     */
+    public function test_it_refuses_a_model_override_on_a_bridge_that_cannot_switch_models(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+
+        $this->expectException(AiRequestNotSentException::class);
+        $this->expectExceptionMessage('cannot switch it to "gpt-4o-mini"');
+
+        $this->azureClient($platform)->chat($this->helloRequest(), ['model' => 'gpt-4o-mini']);
+    }
+
+    /**
+     * Naming the model the row is already configured with is not an override at all.
+     */
+    public function test_it_accepts_the_configured_model_as_an_override_on_a_bridge_that_cannot_switch(): void
+    {
+        $platform = new FakePlatform(new FakeResult(new TextResult('Hi')));
+
+        $this->azureClient($platform)->chat($this->helloRequest(), ['model' => 'gpt-4o']);
+
+        self::assertSame('gpt-4o', $platform->model);
+    }
+
+    /**
+     * Streaming shares invoke() with the buffered path, so an unroutable model is refused the same
+     * way before the first chunk.
+     */
+    public function test_streaming_throws_request_not_sent_for_a_model_the_platform_cannot_route(): void
+    {
+        $platform = new FakePlatform(
+            null,
+            new \Symfony\AI\Platform\Exception\ModelNotFoundException('No provider found for model "gpt-9".')
+        );
+
+        $this->expectException(AiRequestNotSentException::class);
+
+        iterator_to_array($this->client($platform)->streamChat($this->helloRequest(), ['model' => 'gpt-9']));
+    }
+
+    /**
      * Streaming shares invoke() with the buffered path, so the option has to be gone before that
      * shared code hands the options to normalizeOptions() there too, not only on the chat() path.
      */
@@ -1283,6 +1448,7 @@ final class FakeResult
         private readonly ?Metadata $metadata = null,
         private readonly array $deltas = [],
         private readonly ?\Throwable $resultFailure = null,
+        private readonly ?\Throwable $streamFailure = null,
     ) {
     }
 
@@ -1303,6 +1469,10 @@ final class FakeResult
     public function asStream(): \Generator
     {
         yield from $this->deltas;
+
+        if ($this->streamFailure !== null) {
+            throw $this->streamFailure;
+        }
     }
 
     public function getAssistantMessage(): AssistantMessage

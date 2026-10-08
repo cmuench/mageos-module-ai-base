@@ -7,10 +7,10 @@ namespace MageOS\AiBase\Model\Client;
 /**
  * Maps service codes to their Symfony AI bridge and the composer package that provides it.
  *
- * The bridges are a soft dependency: the module stores and serves provider configuration with
- * none of them installed, and other modules may talk to a provider with their own HTTP client.
- * They are only needed by the bundled client layer (`AiClientInterface`) and the admin's Test
- * Connection button.
+ * The OpenAI and Anthropic bridges are required by composer.json; every other bridge is a
+ * `suggest`. The module stores and serves provider configuration without a provider's bridge,
+ * and other modules may talk to a provider with their own HTTP client. A bridge is only needed by
+ * the bundled client layer (`AiClientInterface`) and the admin's Test Connection button.
  *
  * Since symfony/ai-platform 0.12 the bridges ship as one package per provider rather than inside
  * the platform package, so knowing the package name per service code is what lets the admin form
@@ -22,6 +22,7 @@ namespace MageOS\AiBase\Model\Client;
  *     dialect?: string,
  *     catalog?: string,
  *     cache_outside_prompt?: bool|string,
+ *     model_override?: bool|string,
  * }
  */
 class BridgeRegistry
@@ -50,6 +51,11 @@ class BridgeRegistry
      * Key of the cache-outside-prompt flag within a bridge definition.
      */
     private const KEY_CACHE_OUTSIDE_PROMPT = 'cache_outside_prompt';
+
+    /**
+     * Key of the per-call model override flag within a bridge definition.
+     */
+    private const KEY_MODEL_OVERRIDE = 'model_override';
 
     /**
      * @param array<string,BridgeDefinition> $bridges Service code => bridge, package,
@@ -159,6 +165,24 @@ class BridgeRegistry
     public function isCacheOutsidePrompt(string $serviceCode): bool
     {
         $value = $this->bridges[$serviceCode][self::KEY_CACHE_OUTSIDE_PROMPT] ?? false;
+
+        return is_string($value) ? filter_var($value, FILTER_VALIDATE_BOOLEAN) : $value;
+    }
+
+    /**
+     * Whether a call can run against another model than the one the row was configured with.
+     *
+     * True for every bridge that takes the model per request. Azure's does not: its platform is
+     * built for one deployment and sends that deployment as the model on every call, so an
+     * override would be silently ignored while the usage log booked it to a model that never ran.
+     * A bridge that omits the flag allows overrides.
+     *
+     * @param string $serviceCode
+     * @return bool
+     */
+    public function allowsModelOverride(string $serviceCode): bool
+    {
+        $value = $this->bridges[$serviceCode][self::KEY_MODEL_OVERRIDE] ?? true;
 
         return is_string($value) ? filter_var($value, FILTER_VALIDATE_BOOLEAN) : $value;
     }

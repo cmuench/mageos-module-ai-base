@@ -4,14 +4,12 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\AiServices;
 
-use MageOS\AiBase\Api\Data\AiServiceConfigurationInterface;
 use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
+use MageOS\AiBase\Api\JsonFetcherInterface;
 use MageOS\AiBase\Api\ModelListProviderInterface;
-use MageOS\AiBase\Model\ModelList\HttpFetcher;
 
-class OpenAi implements AiServiceConfigurationInterface, ModelListProviderInterface
+class OpenAi extends AbstractAiService implements ModelListProviderInterface
 {
-    use FieldFactoryTrait;
     use ModelListTrait;
 
     /**
@@ -21,12 +19,13 @@ class OpenAi implements AiServiceConfigurationInterface, ModelListProviderInterf
 
     /**
      * @param FieldDescriptorInterfaceFactory $fieldFactory
-     * @param HttpFetcher $modelListFetcher
+     * @param JsonFetcherInterface $modelListFetcher
      */
     public function __construct(
-        private readonly FieldDescriptorInterfaceFactory $fieldFactory,
-        private readonly HttpFetcher $modelListFetcher,
+        FieldDescriptorInterfaceFactory $fieldFactory,
+        private readonly JsonFetcherInterface $modelListFetcher,
     ) {
+        parent::__construct($fieldFactory);
     }
 
     /**
@@ -46,16 +45,20 @@ class OpenAi implements AiServiceConfigurationInterface, ModelListProviderInterf
     }
 
     /**
-     * @inheritdoc
+     * Curated fallback for a row that has not refreshed its list from the API yet.
+     *
+     * Kept short on purpose: Refresh Models lists everything the account can use.
+     *
+     * @return array<string, string>
      */
     public function getSupportedModels(): array
     {
         return [
-            'gpt-4o'      => 'GPT-4o',
-            'gpt-4o-mini' => 'GPT-4o mini',
-            'gpt-4-turbo' => 'GPT-4 Turbo',
-            'o1'          => 'o1',
-            'o1-mini'     => 'o1 mini',
+            'gpt-5.5'      => 'GPT-5.5',
+            'gpt-5.4'      => 'GPT-5.4',
+            'gpt-5.4-mini' => 'GPT-5.4 mini',
+            'gpt-5.4-nano' => 'GPT-5.4 nano',
+            'gpt-4.1'      => 'GPT-4.1',
         ];
     }
 
@@ -65,8 +68,8 @@ class OpenAi implements AiServiceConfigurationInterface, ModelListProviderInterf
     public function getConfigurationFields(): array
     {
         return [
-            $this->apiKeyField($this->fieldFactory),
-            $this->modelField($this->fieldFactory, $this->getSupportedModels()),
+            $this->apiKeyField(),
+            $this->modelField($this->getSupportedModels()),
         ];
     }
 

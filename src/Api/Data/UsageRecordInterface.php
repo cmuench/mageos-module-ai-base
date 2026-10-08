@@ -13,6 +13,11 @@ namespace MageOS\AiBase\Api\Data;
  * that a stored row always has is nonetheless read here from immutable constructor state rather
  * than from a database round-trip: a record that has not been saved yet is a legitimate value of
  * this type, not a special case.
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface UsageRecordInterface
 {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Api;
 
+use Symfony\AI\Platform\PlatformInterface;
+
 /**
  * Escape hatch to the symfony/ai-platform instance behind a client.
  *
@@ -31,21 +33,22 @@ namespace MageOS\AiBase\Api;
  *     }
  *
  *     $agent = new Agent($client->getPlatform(), $client->getModel(), $toolProcessors);
+ *
+ * Stable to call, not meant to be implemented: methods may be added in a minor release. To change
+ * what it does, write a plugin on it instead of replacing it.
+ *
+ * @api
  */
 interface PlatformAwareInterface
 {
     /**
      * The configured platform, ready to invoke.
      *
-     * Typed as `object` rather than as the Symfony interface on purpose: symfony/ai-platform is a
-     * soft dependency, and this module has to stay loadable, compilable and usable for
-     * configuration storage on an install that never installed it.
-     *
      * Pair it with `AiClientInterface::getModel()`, which is the model name to invoke it with.
      *
-     * @return object A \Symfony\AI\Platform\PlatformInterface
+     * @return PlatformInterface
      */
-    public function getPlatform(): object;
+    public function getPlatform(): PlatformInterface;
 
     /**
      * Rewrite the universal options for this client's provider, as chat() does internally.

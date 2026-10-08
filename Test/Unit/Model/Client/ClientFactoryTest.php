@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Model\Client;
 
+use Magento\Framework\App\Area;
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Exception\LocalizedException;
+use MageOS\AiBase\AiServices\Azure;
+use MageOS\AiBase\AiServices\LmStudio;
+use MageOS\AiBase\AiServices\Ollama;
+use MageOS\AiBase\AiServices\OpenAiCompatible;
 use MageOS\AiBase\Api\AiServiceSelectorInterface;
+use MageOS\AiBase\Api\Data\FieldDescriptorInterfaceFactory;
 use MageOS\AiBase\Api\PlatformAwareInterface;
 use MageOS\AiBase\Model\AiService;
 use MageOS\AiBase\Model\Client\AiExceptionMapper;
@@ -20,10 +26,18 @@ use MageOS\AiBase\Model\Client\RecordingPlatformAwareAiClientFactory;
 use MageOS\AiBase\Model\Client\SymfonyAiClient;
 use MageOS\AiBase\Model\Client\SymfonyAiClientFactory;
 use MageOS\AiBase\Model\Client\UsageNormalizer;
+use MageOS\AiBase\Model\ModelList\HttpFetcher;
+use MageOS\AiBase\Model\ServiceRegistry;
 use MageOS\AiBase\Model\Usage\UsageConfig;
+use MageOS\AiBase\Model\Usage\UsageStoreResolver;
 use PHPUnit\Framework\Attributes\TestWith;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\NullLogger;
+use Symfony\Component\HttpClient\MockHttpClient;
+use Symfony\Component\HttpClient\Response\MockResponse;
+use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\AI\Platform\Test\InMemoryPlatform;
 
 final class ClientFactoryTest extends TestCase
 {
@@ -42,6 +56,7 @@ final class ClientFactoryTest extends TestCase
         $this->usageTrackingEnabled = false;
 
         RecordingAnthropicFactory::$apiKey = null;
+        RecordingAnthropicFactory::$httpClient = null;
         RecordingAnthropicFactory::$modelCatalog = null;
         RecordingLocalRuntimeFactory::$baseUrl = null;
     }
@@ -56,7 +71,7 @@ final class ClientFactoryTest extends TestCase
      * @param BridgeRegistry $bridgeRegistry
      * @return ClientFactory
      */
-    private function newSubject(BridgeRegistry $bridgeRegistry): ClientFactory
+    private function newSubject(BridgeRegistry $bridgeRegistry, ?HttpClientInterface $httpClient = null): ClientFactory
     {
         return new ClientFactory(
             $this->serviceSelector,
@@ -65,7 +80,28 @@ final class ClientFactoryTest extends TestCase
             new UsageConfig(new FakeScopeConfig($this->usageTrackingEnabled)),
             $this->recordingClientFactory,
             $this->recordingPlatformAwareClientFactory,
+            $this->serviceRegistry(),
+            $httpClient,
         );
+    }
+
+    /**
+     * The bundled providers whose bridge factories take something other than the API key first,
+     * so the tests below exercise the arguments the providers themselves hand over.
+     *
+     * @return ServiceRegistry
+     */
+    private function serviceRegistry(): ServiceRegistry
+    {
+        $fieldFactory = $this->createMock(FieldDescriptorInterfaceFactory::class);
+        $modelListFetcher = $this->createMock(HttpFetcher::class);
+
+        return new ServiceRegistry([
+            new Ollama($fieldFactory, $modelListFetcher),
+            new LmStudio($fieldFactory, $modelListFetcher),
+            new OpenAiCompatible($fieldFactory),
+            new Azure($fieldFactory),
+        ]);
     }
 
     /**
@@ -287,6 +323,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -343,6 +380,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -375,6 +413,38 @@ final class ClientFactoryTest extends TestCase
      * The catalogue is frozen at the installed bridge version, so a model the provider shipped
      * later is unroutable no matter how valid the credentials. The administrator's choice wins.
      */
+    /**
+     * A provider's own credential header (Azure's `api-key`) survives a redirect to another host,
+     * unlike `Authorization`, so the client every bridge gets must not follow redirects at all.
+     * Issue #64.
+     */
+    public function test_create_hands_the_bridge_an_http_client_that_does_not_follow_redirects(): void
+    {
+        $sentOptions = [];
+        $transport = new MockHttpClient(
+            static function (string $method, string $url, array $options) use (&$sentOptions): MockResponse {
+                $sentOptions[] = $options;
+
+                return new MockResponse('', ['http_code' => 307, 'response_headers' => ['Location: https://elsewhere.test/']]);
+            }
+        );
+        $this->serviceSelector->method('getByCode')->with('anthropic')->willReturn([
+            new AiService('row_anthropic', 'anthropic', ['api_key' => 'k', 'model' => 'claude-sonnet-5']),
+        ]);
+        $this->clientFactory->method('create')->willReturn($this->createMock(SymfonyAiClient::class));
+        $subject = $this->newSubject(new BridgeRegistry([
+            'anthropic' => ['factory' => RecordingAnthropicFactory::class, 'package' => 'symfony/ai-anthropic-platform'],
+        ]), $transport);
+
+        $subject->create('anthropic');
+        $status = RecordingAnthropicFactory::$httpClient->request('POST', 'https://api.anthropic.test/v1/messages')
+            ->getStatusCode();
+
+        self::assertSame(307, $status, 'The redirect is reported, not followed.');
+        self::assertCount(1, $sentOptions);
+        self::assertSame(0, $sentOptions[0]['max_redirects']);
+    }
+
     public function test_create_registers_a_model_the_bridge_catalogue_does_not_know(): void
     {
         $this->serviceSelector->method('getByCode')->with('anthropic')->willReturn([
@@ -590,7 +660,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -637,6 +707,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -644,7 +715,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -661,12 +732,12 @@ final class ClientFactoryTest extends TestCase
         $this->usageTrackingEnabled = true;
         $this->serviceSelector->method('getByCode')->with('openai')
             ->willReturn([new AiService('row_openai', 'openai', ['api_key' => 'k', 'model' => 'gpt-4o'])]);
-        $this->clientFactory->method('create')->willReturn(new FakePlatformAwareAiClient(new \stdClass()));
+        $this->clientFactory->method('create')->willReturn(new FakePlatformAwareAiClient(new InMemoryPlatform('Hi')));
         $this->recordingPlatformAwareClientFactory->method('create')->willReturnCallback(
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -689,7 +760,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingAiClient => new RecordingAiClient(
                 $data['delegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -717,6 +788,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -724,7 +796,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -752,6 +824,7 @@ final class ClientFactoryTest extends TestCase
                 new UsageNormalizer(new BridgeRegistry([])),
                 new AiExceptionMapper(),
                 new BridgeRegistry([]),
+                new NullLogger(),
                 $data['consumer'],
             )
         );
@@ -759,7 +832,7 @@ final class ClientFactoryTest extends TestCase
             fn (array $data): RecordingPlatformAwareAiClient => new RecordingPlatformAwareAiClient(
                 $data['platformAwareDelegate'],
                 new FakeUsageRecordRepository(),
-                new FakeStoreManager(1),
+                new UsageStoreResolver(new FakeStoreManager(1), new FakeAppState(Area::AREA_FRONTEND), new NullLogger()),
                 new FakeLogger(),
             )
         );
@@ -793,6 +866,7 @@ final class FakePlatformFactory
 final class RecordingAnthropicFactory
 {
     public static ?string $apiKey = null;
+    public static ?object $httpClient = null;
     public static ?object $modelCatalog = null;
 
     public static function createPlatform(
@@ -807,6 +881,7 @@ final class RecordingAnthropicFactory
         string $baseUrl = 'https://api.anthropic.com',
     ): object {
         self::$apiKey = $apiKey;
+        self::$httpClient = $httpClient;
         self::$modelCatalog = $modelCatalog;
 
         return new \stdClass();

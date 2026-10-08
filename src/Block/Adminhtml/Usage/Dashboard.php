@@ -11,12 +11,10 @@ use MageOS\AiBase\Api\Data\Granularity;
 use MageOS\AiBase\Api\Data\Period;
 use MageOS\AiBase\Api\Data\UsageBreakdownInterface;
 use MageOS\AiBase\Api\Data\UsageTotalsInterface;
-use MageOS\AiBase\Api\AiServiceSelectorInterface;
-use MageOS\AiBase\Api\Data\AiServiceInterface;
 use MageOS\AiBase\Api\UsageStatsInterface;
 use MageOS\AiBase\Model\Usage\Graph\DataPoint;
 use MageOS\AiBase\Model\Usage\Graph\SvgRenderer;
-use MageOS\AiBase\Model\ServiceRegistry;
+use MageOS\AiBase\Model\Usage\ServiceRowLabels;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 
 /**
@@ -169,9 +167,8 @@ class Dashboard extends Template
      *        docblock for why the result is not escaped again by the template.
      * @param TimezoneInterface $timezone Store timezone {@see Period}'s named constructors resolve
      *        local calendar boundaries against.
-     * @param AiServiceSelectorInterface $serviceSelector Configured rows, for turning the stored
-     *        `service_id` of a breakdown into the provider name an administrator recognises.
-     * @param ServiceRegistry $serviceRegistry Registered backends, source of that provider name.
+     * @param ServiceRowLabels $serviceRowLabels Turns the stored `service_id` of a breakdown or
+     *        series into a unique name an administrator recognises.
      * @param \Magento\Store\Model\StoreManagerInterface $storeManager Stores the page can be scoped to.
      * @param array<string,mixed> $data
      * @param \DateTimeImmutable|null $now Deterministic clock for tests, the same convention
@@ -184,8 +181,7 @@ class Dashboard extends Template
         private readonly UsageConfig $usageConfig,
         private readonly SvgRenderer $svgRenderer,
         private readonly TimezoneInterface $timezone,
-        private readonly AiServiceSelectorInterface $serviceSelector,
-        private readonly ServiceRegistry $serviceRegistry,
+        private readonly ServiceRowLabels $serviceRowLabels,
         private readonly \Magento\Store\Model\StoreManagerInterface $storeManager,
         array $data = [],
         private readonly ?\DateTimeImmutable $now = null,
@@ -298,7 +294,11 @@ class Dashboard extends Template
      */
     public function getServiceGraph(): string
     {
-        $serviceLabels = $this->serviceLabels();
+        $breakdown = $this->getServiceBreakdown();
+        $serviceLabels = $this->serviceRowLabels->getLabels(array_map(
+            fn (UsageBreakdownInterface $row): string => $row->getGroupValue(),
+            $breakdown
+        ));
 
         return $this->svgRenderer->renderBarChart(
             array_map(
@@ -306,7 +306,7 @@ class Dashboard extends Template
                     $serviceLabels[$row->getGroupValue()] ?? $row->getGroupValue(),
                     (float) $row->getTotals()->getTotalTokens()
                 ),
-                $this->getServiceBreakdown()
+                $breakdown
             ),
             (string) __('Tokens by service')
         );
@@ -357,11 +357,15 @@ class Dashboard extends Template
                 $this->storeId()
             );
 
-        $serviceLabels = $byService ? $this->serviceLabels() : [];
+        $serviceLabels = $byService
+            ? $this->serviceRowLabels->getLabels(array_map('strval', array_keys($grouped)))
+            : [];
         $series = [];
         foreach ($grouped as $groupValue => $buckets) {
-            $label = $this->seriesLabel((string) $groupValue, $serviceLabels);
-            $series[$label] = $this->toTrendDataPoints($buckets, $granularity);
+            $series[$this->seriesLabel((string) $groupValue, $serviceLabels)] = $this->toTrendDataPoints(
+                $buckets,
+                $granularity
+            );
         }
 
         return $this->svgRenderer->renderMultiTrendChart($series, (string) __('Tokens over time'));
@@ -454,7 +458,7 @@ class Dashboard extends Template
         $options = [self::STORE_ALL => (string) __('All stores')];
         // `true` keeps the admin store in the list. Every call made outside a storefront — an
         // admin controller, cron, the CLI — is recorded against store 0
-        // ({@see \MageOS\AiBase\Model\Client\RecordingAiClient::resolveStoreId()}), which on
+        // ({@see \MageOS\AiBase\Model\Usage\UsageStoreResolver}), which on
         // most installs is the bulk of this module's traffic; a selector that quietly omitted it
         // would offer no way to look at exactly the usage an administrator most wants to see.
         foreach ($this->storeManager->getStores(true) as $store) {
@@ -557,11 +561,14 @@ class Dashboard extends Template
      * A series' name as the legend shows it.
      *
      * The stats layer keys its folded tail with a machine constant; the legend needs a word. A
-     * by-service series is keyed by the row's opaque id, which the legend resolves to the provider
-     * name the same way the breakdown beneath it does.
+     * by-service series is keyed by the row's opaque id, which the legend resolves through
+     * {@see ServiceRowLabels} the same way the breakdown beneath it does. Those labels are unique
+     * per id, which matters here more than anywhere: the chart keys its lines by label, so two rows
+     * sharing one (two Anthropic rows labelled by provider name alone) used to collapse into a
+     * single line and silently drop the other row's usage.
      *
      * @param string $groupValue
-     * @param array<string,string> $serviceLabels
+     * @param array<array-key,string> $serviceLabels
      * @return string
      */
     private function seriesLabel(string $groupValue, array $serviceLabels): string
@@ -644,39 +651,6 @@ class Dashboard extends Template
     private function formatNullableTokenCount(?int $tokenCount): string
     {
         return $tokenCount === null ? (string) __('Not reported') : number_format((float) $tokenCount, 0);
-    }
-
-    /**
-     * Provider name per configured row id, for turning a by-service breakdown's opaque
-     * `service_id` into something an administrator recognises.
-     *
-     * The same mapping {@see \MageOS\AiBase\Model\Usage\Source\ServiceRow} applies to the
-     * grid's filter, and for the same reason: `service_id` is a JSON object key the admin form
-     * generated, which names nothing. A row whose provider is no longer registered, or whose id no
-     * longer resolves to a configured row at all, keeps its raw id at the call site rather than
-     * disappearing from the chart.
-     *
-     * @return array<string,string>
-     */
-    private function serviceLabels(): array
-    {
-        $labels = [];
-        foreach ($this->serviceSelector->getAll() as $service) {
-            $labels[$service->getId()] = $this->serviceLabel($service);
-        }
-
-        return $labels;
-    }
-
-    /**
-     * Human provider name for one configured row, falling back to its raw service code.
-     *
-     * @param AiServiceInterface $service
-     * @return string
-     */
-    private function serviceLabel(AiServiceInterface $service): string
-    {
-        return $this->serviceRegistry->get($service->getCode())?->getName() ?? $service->getCode();
     }
 
     /**

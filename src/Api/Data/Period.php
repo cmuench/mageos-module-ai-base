@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Api\Data;
 
 use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
+use MageOS\AiBase\Model\Usage\ReportingTimezone;
 
 /**
  * A half-open window `[start, end)` of absolute UTC instants that
@@ -13,9 +14,10 @@ use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
  * The named constructors below are what keep "today" or "this month" meaning what an
  * administrator actually typed into a calendar in their own timezone, not what UTC's calendar
  * happens to say at the moment the query runs: each resolves the local day/month/year boundary in
- * the store timezone {@see TimezoneInterface} reports, then converts that boundary to UTC once,
- * here, so every repository this module queries keeps comparing plain UTC timestamps and never
- * calls `DATE()` or `CONVERT_TZ()` (see task 003's schema comments for why that matters).
+ * the reporting timezone (Default Config's, read through {@see ReportingTimezone} so cron, CLI and
+ * admin all agree on it), then converts that boundary to UTC once, here, so every repository this
+ * module queries keeps comparing plain UTC timestamps and never calls `DATE()` or `CONVERT_TZ()`
+ * (see task 003's schema comments for why that matters).
  *
  * Immutable and constructed only through the named constructors or {@see between()}: there is no
  * public constructor, so a caller can never build a `Period` whose end precedes its start by
@@ -27,6 +29,9 @@ use Magento\Framework\Stdlib\DateTime\TimezoneInterface;
  * bug, not a customisation. Hence the sniff is switched off for this file alone.
  */
 // phpcs:disable Magento2.Functions.StaticFunction
+/**
+ * @api
+ */
 class Period
 {
     /**
@@ -40,7 +45,7 @@ class Period
     }
 
     /**
-     * The current local calendar day, start to end, in the store timezone.
+     * The current local calendar day, start to end, in the reporting timezone.
      *
      * @param TimezoneInterface $timezone
      * @param \DateTimeImmutable|null $now Deterministic clock for tests. Production callers leave
@@ -56,7 +61,7 @@ class Period
     }
 
     /**
-     * The current local calendar month, start to end, in the store timezone.
+     * The current local calendar month, start to end, in the reporting timezone.
      *
      * @param TimezoneInterface $timezone
      * @param \DateTimeImmutable|null $now {@see today()}
@@ -72,7 +77,7 @@ class Period
     }
 
     /**
-     * The current local calendar year, start to end, in the store timezone.
+     * The current local calendar year, start to end, in the reporting timezone.
      *
      * @param TimezoneInterface $timezone
      * @param \DateTimeImmutable|null $now {@see today()}
@@ -124,7 +129,7 @@ class Period
     }
 
     /**
-     * The current instant in the store timezone, real or the deterministic one a test supplied.
+     * The current instant in the reporting timezone, real or the deterministic one a test supplied.
      *
      * @param TimezoneInterface $timezone
      * @param \DateTimeImmutable|null $now
@@ -132,7 +137,7 @@ class Period
      */
     private static function localNow(TimezoneInterface $timezone, ?\DateTimeImmutable $now): \DateTimeImmutable
     {
-        $storeTimezone = new \DateTimeZone($timezone->getConfigTimezone());
+        $storeTimezone = ReportingTimezone::resolve($timezone);
 
         return $now instanceof \DateTimeImmutable
             ? $now->setTimezone($storeTimezone)

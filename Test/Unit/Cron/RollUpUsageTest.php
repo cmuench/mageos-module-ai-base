@@ -4,11 +4,19 @@ declare(strict_types=1);
 
 namespace MageOS\AiBase\Test\Unit\Cron;
 
+require_once __DIR__ . '/../Stubs/InMemoryLockManager.php';
+require_once __DIR__ . '/../Stubs/DailyRowAddition.php';
+require_once __DIR__ . '/../Stubs/FakeUsageTransaction.php';
+
 use MageOS\AiBase\Api\UsageDailyRepositoryInterface;
 use MageOS\AiBase\Api\UsageRecordRepositoryInterface;
 use MageOS\AiBase\Cron\RollUpUsage;
 use MageOS\AiBase\Model\Usage\UsageConfig;
 use MageOS\AiBase\Model\Usage\UsageMaintenance;
+use MageOS\AiBase\Model\Usage\UsageRecordReportInterface;
+use MageOS\AiBase\Test\Unit\Stubs\DailyRowAddition;
+use MageOS\AiBase\Test\Unit\Stubs\FakeUsageTransaction;
+use MageOS\AiBase\Test\Unit\Stubs\InMemoryLockManager;
 use Magento\Framework\Api\SearchCriteriaInterface;
 use Magento\Framework\Api\SearchResultsInterface;
 use Magento\Framework\App\Config\ScopeConfigInterface;
@@ -30,6 +38,7 @@ final class RollUpUsageTest extends TestCase
     private FakeUsageDailyRepository $usageDailyRepository;
     private FakeScopeConfig $scopeConfig;
     private FakeLogger $logger;
+    private InMemoryLockManager $lockManager;
     private RollUpUsage $subject;
 
     protected function setUp(): void
@@ -40,14 +49,18 @@ final class RollUpUsageTest extends TestCase
         $this->scopeConfig->setValue('mageos_ai/usage/retention_days', '30');
         $this->scopeConfig->setValue('mageos_ai/usage/daily_retention_days', '730');
         $this->logger = new FakeLogger();
+        $this->lockManager = new InMemoryLockManager();
 
         $usageConfig = new UsageConfig($this->scopeConfig);
         $usageMaintenance = new UsageMaintenance(
             $usageConfig,
             $this->usageRecordRepository,
+            $this->usageRecordRepository,
             $this->usageDailyRepository,
             new FakeTimezone('UTC'),
-            new \MageOS\AiBase\Test\Unit\Model\Usage\FakeUsageTransaction(),
+            new FakeUsageTransaction(),
+            $this->lockManager,
+            $this->logger,
         );
 
         $this->subject = new RollUpUsage($usageMaintenance, $this->logger);
@@ -90,6 +103,21 @@ final class RollUpUsageTest extends TestCase
         self::assertStringContainsString('aggregated 1', $records[0]['message']);
         self::assertStringContainsString('deleted 1', $records[0]['message']);
         self::assertStringContainsString('pruned 0', $records[0]['message']);
+    }
+
+    public function test_it_logs_no_summary_when_another_run_held_the_rollup_lock(): void
+    {
+        $this->lockManager->givenLockHeldElsewhere(UsageMaintenance::LOCK_NAME);
+        $this->usageRecordRepository->addRow($this->row());
+
+        $this->subject->execute();
+
+        // UsageMaintenance's own notice is the only line: an all-zero summary next to it would
+        // read as "ran and found nothing", which is not what happened.
+        $records = $this->logger->getRecords();
+        self::assertCount(1, $records);
+        self::assertSame('notice', $records[0]['level']);
+        self::assertCount(1, $this->usageRecordRepository->getRemainingRows());
     }
 
     public function test_it_logs_and_rethrows_a_maintenance_failure(): void
@@ -145,12 +173,13 @@ final class RollUpUsageTest extends TestCase
 }
 
 /**
- * In-memory stand-in for {@see UsageRecordRepositoryInterface}, trimmed to what
- * {@see UsageMaintenance} calls, plus {@see throwOnAggregate()} so
+ * In-memory stand-in for {@see UsageRecordRepositoryInterface} and
+ * {@see UsageRecordReportInterface}, trimmed to what {@see UsageMaintenance} calls and passed to it
+ * once for each contract, plus {@see throwOnAggregate()} so
  * {@see RollUpUsageTest::test_it_logs_and_rethrows_a_maintenance_failure()} can force the failure
  * path without reaching for a mock.
  */
-final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
+final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface, UsageRecordReportInterface
 {
     /**
      * @var array<int,array<string,int|string|null>>
@@ -345,7 +374,8 @@ final class FakeUsageRecordRepository implements UsageRecordRepositoryInterface
 
 /**
  * In-memory stand-in for {@see UsageDailyRepositoryInterface}, trimmed to what
- * {@see UsageMaintenance} calls.
+ * {@see UsageMaintenance} calls. A colliding row is added to the stored one through
+ * {@see DailyRowAddition}, the same way the real upsert does.
  */
 final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
 {
@@ -364,7 +394,9 @@ final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
                 $row['consumer'],
                 $row['store_id'],
             ]);
-            $this->rowsByKey[$key] = $row;
+            $this->rowsByKey[$key] = isset($this->rowsByKey[$key])
+                ? DailyRowAddition::add($this->rowsByKey[$key], $row)
+                : $row;
         }
     }
 
@@ -388,56 +420,12 @@ final class FakeUsageDailyRepository implements UsageDailyRepositoryInterface
         return count($keysToDelete);
     }
 
-    public function sumRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        ?string $consumer = null,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
-    public function groupRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $groupBy,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
-    public function seriesRange(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        ?int $storeId = null
-    ): array
-    {
-        throw new \LogicException('Not needed by RollUpUsageTest.');
-    }
-
     /**
      * @return array<int,array<string,int|string|null>>
      */
     public function getStoredRows(): array
     {
         return array_values($this->rowsByKey);
-    }
-    /**
-     * Not exercised by this test's subject; present so the fake satisfies the interface.
-     *
-     * @return array<int,array<string,int|string|null>>
-     */
-    public function seriesRangeGrouped(
-        \DateTimeInterface $from,
-        \DateTimeInterface $to,
-        string $granularity,
-        string $groupBy,
-        ?int $storeId = null
-    ): array {
-        return [];
     }
 }
 

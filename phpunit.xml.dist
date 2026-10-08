@@ -10,11 +10,10 @@
             <directory>Test/Unit</directory>
         </testsuite>
         <!--
-            The tests that need symfony/ai-platform to be installed to mean anything. In the
-            Magento install CI otherwise runs against, the package is absent (it is a `suggest`,
-            and composer does not install a dependency's require-dev), so every one of these
-            skips and the chat client mapping goes unverified. CI runs this suite standalone
-            with the package present.
+            The chat client tests, which run against the real symfony/ai-platform classes and
+            need nothing Magento generates. The Magento job runs them too, now that the module
+            requires the platform; CI also runs this suite standalone across the full PHP range
+            composer.json claims, which the Magento matrix does not cover.
 
             Deliberately not the whole Unit suite: the rest mocks Magento's auto-generated
             *Factory classes, which the ObjectManager code generator fabricates only inside a
@@ -25,6 +24,7 @@
             <directory>Test/Unit/Model/Chat</directory>
             <file>Test/Unit/Model/Client/SymfonyAiClientChatTest.php</file>
             <file>Test/Unit/Model/Client/SymfonyAiClientStreamFailureTest.php</file>
+            <file>Test/Unit/Model/Client/SymfonyAiClientTruncatedStreamTest.php</file>
             <file>Test/Unit/Model/Client/UsageNormalizerTest.php</file>
         </testsuite>
         <!--
