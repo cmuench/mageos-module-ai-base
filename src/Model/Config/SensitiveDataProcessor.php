@@ -355,10 +355,15 @@ class SensitiveDataProcessor
     /**
      * Whether a value already carries the encryptor envelope.
      *
+     * Public so ServiceImporter can tell a ciphertext another module stored from a plaintext key
+     * with the same definition this class encrypts and decrypts by. That matters more than it
+     * looks: Magento's encryptor does not refuse a plaintext, it decrypts one as a legacy
+     * Blowfish value and hands back garbage.
+     *
      * @param string $value
      * @return bool
      */
-    private function isEncrypted(string $value): bool
+    public function isEncrypted(string $value): bool
     {
         return (bool)preg_match(self::ENCRYPTED_ENVELOPE_PATTERN, $value);
     }

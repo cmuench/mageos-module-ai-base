@@ -6,6 +6,8 @@
     <preference for="MageOS\AiBase\Api\Data\FieldDescriptorInterface" type="MageOS\AiBase\Model\FieldDescriptor"/>
     <preference for="MageOS\AiBase\Api\AiClientFactoryInterface" type="MageOS\AiBase\Model\Client\ClientFactory"/>
     <preference for="MageOS\AiBase\Api\JsonFetcherInterface" type="MageOS\AiBase\Model\ModelList\HttpFetcher"/>
+    <!-- For other modules' data patches moving their own saved credentials into this module. -->
+    <preference for="MageOS\AiBase\Api\ServiceImporterInterface" type="MageOS\AiBase\Model\Config\ServiceImporter"/>
 
     <!-- Chat value objects. Consumer modules are told to type-hint against Api only, which is only
          honest if there is a way to obtain one without naming a Model class: these preferences are

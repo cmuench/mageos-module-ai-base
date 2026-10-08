@@ -519,6 +519,101 @@ if ($service === null) {
 back to another row: another row means another account and another bill, which is not a
 substitution to make on the admin's behalf.
 
+## Moving your module's own credentials into AI Base
+
+A module that kept its own API key fields before it used this one can move the saved key over
+in a data patch, so the merchant doesn't have to find it and type it in again (an `obscure`
+field can't be read back to copy it anyway). `Api\ServiceImporterInterface` adds an ordinary
+row to the AI Configuration form and returns its id:
+
+```php
+ServiceImporterInterface::import(string $serviceCode, array $configuration, ?string $label = null): string
+ServiceImporterInterface::importFromConfig(string $serviceCode, array $fieldPaths, ?string $label = null): ?string
+```
+
+- `import()` takes plain values (`['api_key' => 'sk-...', 'model' => 'gpt-4o']`).
+  `importFromConfig()` takes a map of this module's field name to **your** config path, reads
+  each one at default scope, and decrypts the ones this module stores encrypted when they hold
+  a Magento ciphertext (what an `obscure` field with the `Encrypted` backend model stores). A
+  plaintext value, such as a key saved before your field was encrypted, is used as it is.
+- `importFromConfig()` returns `null` and adds nothing when the credential is empty, so the
+  patch doesn't need its own check.
+- The row is added at default scope, enabled, with its credentials encrypted the same way the
+  form encrypts them. The administrator sees and edits it like any other row.
+- Only fields the provider declares are accepted (`api_key`, `model`, `base_url`, ...; see
+  [PROVIDERS.md](PROVIDERS.md)). An unknown field name throws instead of being dropped, so a
+  typo can't quietly import a row without its key. Leaving `model` out is fine.
+- Importing the same values again returns the id of the row that already holds them, so a
+  patch that runs twice, or two modules moving the same key, end up with one row.
+- It throws a `LocalizedException` when the service code isn't registered, when the AI services
+  are pinned in `app/etc/env.php` / `config.php`, or when an administrator saved the AI
+  Configuration form at the same moment. In a data patch that fails `setup:upgrade`, which is
+  usually what you want; catch it if your module can keep running on its old fields.
+
+A complete patch, storing the row id in the module's own `ConfiguredService` select (see
+[Letting the admin pick a service](#letting-the-admin-pick-a-service)) and removing the old key
+afterwards:
+
+```php
+<?php
+
+declare(strict_types=1);
+
+namespace Vendor\Translations\Setup\Patch\Data;
+
+use Magento\Framework\App\Config\Storage\WriterInterface;
+use Magento\Framework\Setup\Patch\DataPatchInterface;
+use MageOS\AiBase\Api\ServiceImporterInterface;
+
+class MoveOpenAiKeyToAiBase implements DataPatchInterface
+{
+    private const OLD_API_KEY_PATH = 'vendor_translations/engine/openai_api_key';
+    private const OLD_MODEL_PATH = 'vendor_translations/engine/openai_model';
+    private const AI_SERVICE_PATH = 'vendor_translations/engine/ai_service';
+
+    public function __construct(
+        private readonly ServiceImporterInterface $serviceImporter,
+        private readonly WriterInterface $configWriter,
+    ) {
+    }
+
+    public function apply(): self
+    {
+        $rowId = $this->serviceImporter->importFromConfig(
+            'openai',
+            ['api_key' => self::OLD_API_KEY_PATH, 'model' => self::OLD_MODEL_PATH],
+            'Translations',
+        );
+        if ($rowId === null) {
+            return $this;
+        }
+
+        $this->configWriter->save(self::AI_SERVICE_PATH, $rowId);
+        $this->configWriter->delete(self::OLD_API_KEY_PATH);
+        $this->configWriter->delete(self::OLD_MODEL_PATH);
+
+        return $this;
+    }
+
+    public static function getDependencies(): array
+    {
+        return [];
+    }
+
+    public function getAliases(): array
+    {
+        return [];
+    }
+}
+```
+
+Then remove the old fields from your `system.xml` and stop reading them; from here on the key
+lives only in AI Base, and your code resolves `AI_SERVICE_PATH` through `createById()`. Only
+the default-scope value is moved: if your old field was editable per website or store, those
+values stay where they are and are yours to handle. Keep `MageOS_AiBase` in your
+`module.xml` `<sequence>` (see [Declare the dependency](#declare-the-dependency)) so its
+configuration is in place when your patch runs.
+
 ## Reaching the platform directly (escape hatch)
 
 `AiClientInterface` covers chat, streaming and single-turn completion. symfony/ai-platform does a

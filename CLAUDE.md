@@ -91,6 +91,8 @@ Consumer modules that want the administrator to choose a service point a `select
 
 Multiple entries per code are possible because admins can add the same backend multiple times in the UI, which is why `getByCode` returns an array.
 
+`Api\ServiceImporterInterface` (impl. `Model\Config\ServiceImporter`) is the one write API: another module's data patch calls `import()` / `importFromConfig()` to move its own saved credentials into a default-scope row and gets the row id back. It encrypts through `SensitiveDataProcessor` and writes through `StoredServicesStorageInterface`, never through the config backend model, so keep those the single definition of a stored row; see "Import path" in `docs/ARCHITECTURE.md`.
+
 Stored data flow:
 
 1. Admin form is an `AbstractFieldArray` rendered via `view/adminhtml/templates/system/config/form/field/services.phtml`.

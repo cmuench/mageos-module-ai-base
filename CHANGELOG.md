@@ -24,6 +24,9 @@ details under "What's stable".
 - **Reading configuration.** `AiServiceSelectorInterface` (`getAll()`, `getByCode()`, `getById()`)
   and the `ConfiguredService` / `ConfiguredServiceWithAutomatic` option sources, so another module
   can let an administrator pick a configured row and store its id.
+  `ServiceImporterInterface` lets another module's data patch move its own saved API key into a
+  configured row (`importFromConfig()` reads and decrypts its `obscure` field) and store the
+  returned id; importing the same values twice returns the same row.
 - **Client.** `AiClientFactoryInterface::create()` / `createById()` build an `AiClientInterface`
   backed by symfony/ai-platform, with `complete()`, multi-turn `chat()` and `streamChat()`. Tool
   calls are surfaced, never executed; reasoning is carried between tool-loop turns; a finished

@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MageOS\AiBase\Model\Config;
 
 use Magento\Framework\App\Cache\Type\Config as ConfigCache;
+use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Adapter\DuplicateException;
 use MageOS\AiBase\Model\AiServiceSelector;
 
 /**
@@ -79,6 +81,42 @@ class StoredServicesStorage implements StoredServicesStorageInterface
             ['value' => $replacement],
             ['config_id = ?' => $stored->configId, 'value = ?' => $stored->value],
         ) === 1;
+    }
+
+    /**
+     * @inheritdoc
+     *
+     * Two steps because the default-scope row may already exist with an empty value (the form
+     * saved with every service removed), which an insert would collide with. Filling that row is
+     * conditional on it still being empty; the insert relies on the table's unique key on scope,
+     * scope id and path, so a value that appeared in between makes it fail instead of overwriting.
+     */
+    public function addDefault(string $value): bool
+    {
+        $connection = $this->resourceConnection->getConnection();
+        $table = $this->resourceConnection->getTableName(self::TABLE);
+        $filled = $connection->update($table, ['value' => $value], [
+            'scope = ?' => ScopeConfigInterface::SCOPE_TYPE_DEFAULT,
+            'scope_id = ?' => 0,
+            'path = ?' => AiServiceSelector::CONFIG_PATH_AI_SERVICES,
+            '(value IS NULL OR value = ?)' => '',
+        ]);
+        if ($filled === 1) {
+            return true;
+        }
+
+        try {
+            $connection->insert($table, [
+                'scope' => ScopeConfigInterface::SCOPE_TYPE_DEFAULT,
+                'scope_id' => 0,
+                'path' => AiServiceSelector::CONFIG_PATH_AI_SERVICES,
+                'value' => $value,
+            ]);
+        } catch (DuplicateException) {
+            return false;
+        }
+
+        return true;
     }
 
     /**

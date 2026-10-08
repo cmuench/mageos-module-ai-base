@@ -11,6 +11,7 @@ shaped the way they are. For task-oriented guides see
 ```
 Api/
   AiServiceSelectorInterface        read configured services (consumer API)
+  ServiceImporterInterface          add a configured service from another module's data patch
   AiClientInterface                 provider-agnostic AI client: chat, streamChat, complete
   AiClientFactoryInterface          builds clients from saved config (consumer API)
   ChatRequestBuilderInterface       assembles a request without naming a Model class
@@ -52,6 +53,7 @@ Model/
   Config/
     SensitiveDataProcessor          encrypt/decrypt/mask/restore per service schema
     CredentialReEncryptor           re-encrypts stored credentials at every scope after a key change
+    ServiceImporter                 adds a default-scope row from code (ServiceImporterInterface)
     StoredServicesStorage           raw read/conditional write of every scope's stored value (internal)
     Backend/EncryptedServices       config backend model (save/load hooks)
     Source/ConfiguredService        option source for consumer modules' own system.xml fields
@@ -139,6 +141,20 @@ The service code cannot fill that role, because the same backend may be register
 with different credentials or models. A row deleted in the admin makes stored ids stale by
 design: the selector answers `null` and the client factory throws, rather than resolving to a
 different row and billing an account nobody chose.
+
+### Import path (another module's data patch → database)
+
+`Model\Config\ServiceImporter` (`Api\ServiceImporterInterface`) adds a row without the config
+model: a data patch has no admin session, and the backend model's save hooks exist for the
+form's masked placeholders. It keeps one definition of a stored row anyway: fields are checked
+against the provider's descriptors, encrypted by `SensitiveDataProcessor::encryptRow()`, and the
+default-scope value is written through `StoredServicesStorageInterface`, conditional on what was
+read (`replace()`, or `addDefault()` when nothing is stored yet), like the re-encryptor. The row
+id has the form's `_<epoch ms>_<ms part>` shape. A row of the same service already holding every
+imported value is returned instead of added. Afterwards it calls
+`ReinitableConfigInterface::reinit()` rather than only cleaning the config cache, because the
+config keeps the default scope in memory once loaded and a read later in the same process would
+otherwise not see the row.
 
 ### Admin display path
 

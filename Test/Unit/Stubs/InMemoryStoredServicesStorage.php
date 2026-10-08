@@ -63,6 +63,29 @@ final class InMemoryStoredServicesStorage implements StoredServicesStorageInterf
         return true;
     }
 
+    public function addDefault(string $value): bool
+    {
+        foreach ($this->values as $stored) {
+            if ($stored->scope === 'default' && $stored->scopeId === 0) {
+                return false;
+            }
+        }
+        $this->withValue(max([0, ...array_keys($this->values)]) + 1, 'default', 0, $value);
+
+        return true;
+    }
+
+    public function getDefaultValue(): ?string
+    {
+        foreach ($this->values as $stored) {
+            if ($stored->scope === 'default' && $stored->scopeId === 0) {
+                return $stored->value;
+            }
+        }
+
+        return null;
+    }
+
     public function invalidateCache(): void
     {
         $this->cacheInvalidations++;
